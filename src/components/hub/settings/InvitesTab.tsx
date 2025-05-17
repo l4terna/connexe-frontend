@@ -232,9 +232,10 @@ const InvitesTab: React.FC<InvitesTabProps> = ({ hubId, isActive }) => {
           startIcon={<AddIcon />}
           onClick={() => setIsCreateInviteModalOpen(true)}
           sx={{
-            background: '#FF69B4',
+            background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
+            color: '#fff',
             '&:hover': {
-              background: '#C71585',
+              background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)',
             }
           }}
         >
@@ -331,7 +332,7 @@ const InvitesTab: React.FC<InvitesTabProps> = ({ hubId, isActive }) => {
         open={isCreateInviteModalOpen}
         onClose={() => setIsCreateInviteModalOpen(false)}
         title="Создание приглашения"
-        maxWidth="xl"
+        
       >
         <Formik
           initialValues={initialValues}
@@ -446,9 +447,10 @@ const InvitesTab: React.FC<InvitesTabProps> = ({ hubId, isActive }) => {
                     type="submit"
                     variant="contained"
                     sx={{
-                      background: '#FF69B4',
+                      background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
+                      color: '#fff',
                       '&:hover': {
-                        background: '#C71585',
+                        background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)',
                       }
                     }}
                   >
@@ -467,7 +469,7 @@ const InvitesTab: React.FC<InvitesTabProps> = ({ hubId, isActive }) => {
           setDeleteConfirmOpen(false);
           setInviteToDelete(null);
         }}
-        maxWidth="xs"
+        
         title="Удалить приглашение?"
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', py: 1 }}>

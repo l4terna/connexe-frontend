@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Paper, Tabs, Tab } from '@mui/material';
-import LoginForm from '../components/LoginForm';
-import RegisterForm from '../components/RegisterForm';
-import Logo from '../components/Logo';
+import LoginForm from '../components/auth/LoginForm';
+import RegisterForm from '../components/auth/RegisterForm';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const AuthPage: React.FC = () => {
@@ -28,7 +27,18 @@ const AuthPage: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: '#121212',
+        background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+        position: 'relative',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'radial-gradient(circle at 50% 50%, rgba(255,105,180,0.1) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        },
       }}
     >
       <Paper
@@ -38,11 +48,11 @@ const AuthPage: React.FC = () => {
           width: '100%',
           maxWidth: 480,
           borderRadius: 2,
-          background: 'transparent',
-          border: '1px solid #2D2D2D',
+          background: 'rgba(20, 20, 30, 0.9)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 105, 180, 0.1)',
         }}
       >
-        <Logo />
         <Tabs
           value={activeTab}
           onChange={handleTabChange}

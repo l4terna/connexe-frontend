@@ -1,4 +1,5 @@
-import { api } from './api';
+import { api } from '@/api/api';
+import { Channel } from '@/api/channels';
 
 export interface Category {
   id: number;
@@ -9,7 +10,7 @@ export interface Category {
 
 export interface CategoriesResponse {
   categories: Category[];
-  channels: any[];
+  channels: Channel[];
 }
 
 export const categoriesApi = api.injectEndpoints({
@@ -60,4 +61,4 @@ export const {
   useGetCategoriesQuery,
   useUpdateCategoryPositionMutation,
   useDeleteCategoryMutation
-} = categoriesApi; 
+} = categoriesApi;

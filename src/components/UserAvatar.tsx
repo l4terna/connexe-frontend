@@ -9,11 +9,13 @@ const StyledUserAvatar = styled(Avatar)<AvatarProps>(({ theme }) => ({
   height: 40,
   position: 'relative',
   background: 'linear-gradient(135deg, #8e1450 0%, #1976D2 100%)',
-  fontSize: '1.5rem',
+  fontSize: '1.4rem',
   fontWeight: 700,
   color: '#fff',
   transition: 'all 0.3s',
   cursor: 'pointer',
+  lineHeight: '40px', // Same as height for vertical centering
+  textAlign: 'center',
   '&:hover': {
     borderColor: 'transparent',
     transform: 'scale(1.05)',
@@ -52,10 +54,26 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
         alt={alt}
         onClick={handleClick}
         {...rest}
+        sx={{
+          ...rest.sx,
+          '& .MuiAvatar-img': {
+            objectFit: 'cover'
+          }
+        }}
       >
-        {!src && (alt && alt.length > 0) ? alt[0].toUpperCase() : '?'}
+        {!src && (alt && alt.length > 0) ? (
+          <span style={{ 
+            lineHeight: 1,
+            display: 'inline-block', 
+            verticalAlign: 'middle',
+            position: 'relative',
+            top: '3px' // Fine-tune vertical positioning
+          }}>
+            {alt[0].toUpperCase()}
+          </span>
+        ) : '?'}
       </StyledUserAvatar>
-      {userId && hubId && anchorPoint && createPortal(
+      {!!(userId && hubId && anchorPoint) && createPortal(
         <UserProfileContainer
           userId={userId}
           hubId={hubId}
@@ -68,4 +86,4 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
   );
 };
 
-export default UserAvatar; 
+export default UserAvatar;

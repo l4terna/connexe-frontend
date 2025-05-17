@@ -2,8 +2,8 @@ import { createTheme } from '@mui/material/styles';
 import { alpha } from '@mui/material/styles';
 
 export const colors = {
-  primary: '#00F5FF',
-  secondary: '#FF00FF',
+  primary: '#FF69B4',
+  secondary: '#1E90FF',
   background: '#0A0A1A',
   text: {
     primary: '#FFFFFF',
@@ -12,8 +12,9 @@ export const colors = {
 };
 
 export const gradients = {
-  neon: 'linear-gradient(45deg, #00F5FF 0%, #FF00FF 100%)',
-  cyber: 'linear-gradient(45deg, #00F5FF 0%, #FF00FF 50%, #00F5FF 100%)',
+  neon: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
+  hover: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)',
+  cyber: 'linear-gradient(45deg, #FF69B4 0%, #1E90FF 50%, #FF69B4 100%)',
 };
 
 export const theme = createTheme({
@@ -108,7 +109,27 @@ export const theme = createTheme({
         },
       },
     },
+    MuiTooltip: {
+      defaultProps: {
+        enterDelay: 600,
+        arrow: true,
+        disableInteractive: true,
+        enterNextDelay: 600,
+      },
+      styleOverrides: {
+        tooltip: {
+          fontSize: '0.875rem',
+          backgroundColor: 'rgba(30, 30, 47, 0.95)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+        },
+        arrow: {
+          color: 'rgba(30, 30, 47, 0.95)',
+        },
+      },
+    },
   },
 });
 
-export default theme; 
+export default theme;

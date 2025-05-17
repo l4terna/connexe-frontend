@@ -1,9 +1,11 @@
 import { Client } from '@stomp/stompjs';
+import { store } from '@/store';
 
 class WebSocketService {
   private static instance: WebSocketService;
   private stompClient: Client | null = null;
   private subscribers: Map<string, Set<(message: any) => void>> = new Map();
+  private subscriptions: Map<string, any> = new Map(); // Store STOMP subscription objects
   private pendingSubscriptions: Array<{ topic: string; callback: (message: any) => void }> = [];
   private isConnecting: boolean = false;
   private connectionPromise: Promise<void> | null = null;
@@ -18,7 +20,7 @@ class WebSocketService {
   }
 
   private getAuthToken(): string | null {
-    return localStorage.getItem('jwt');
+    return store.getState().auth.token;
   }
 
   async ensureConnected(): Promise<void> {
@@ -70,9 +72,23 @@ class WebSocketService {
   }
 
   private processPendingSubscriptions() {
+    // Group callbacks by topic to avoid duplicate subscriptions
+    const topicCallbacks = new Map<string, Set<(message: any) => void>>();
+    
     this.pendingSubscriptions.forEach(({ topic, callback }) => {
-      this.subscribe(topic, callback);
+      if (!topicCallbacks.has(topic)) {
+        topicCallbacks.set(topic, new Set());
+      }
+      topicCallbacks.get(topic)?.add(callback);
     });
+    
+    // Subscribe to each topic once with all callbacks
+    topicCallbacks.forEach((callbacks, topic) => {
+      callbacks.forEach(callback => {
+        this.subscribe(topic, callback);
+      });
+    });
+    
     this.pendingSubscriptions = [];
   }
 
@@ -86,10 +102,19 @@ class WebSocketService {
       this.subscribers.get(topic)?.add(callback);
 
       if (this.stompClient?.connected) {
-        this.stompClient.subscribe(topic, (message) => {
-          const parsedMessage = JSON.parse(message.body);
-          callback(parsedMessage);
-        });
+        // Only create new subscription if not already subscribed to this topic
+        if (!this.subscriptions.has(topic)) {
+          const subscription = this.stompClient.subscribe(topic, (message) => {
+            const parsedMessage = JSON.parse(message.body);
+            // Call all callbacks registered for this topic
+            const callbacks = this.subscribers.get(topic);
+            if (callbacks) {
+              callbacks.forEach(cb => cb(parsedMessage));
+            }
+          });
+          this.subscriptions.set(topic, subscription);
+          console.log(`Subscribed to topic: ${topic}`);
+        }
       } else {
         this.pendingSubscriptions.push({ topic, callback });
       }
@@ -105,8 +130,12 @@ class WebSocketService {
       subscribers.delete(callback);
       if (subscribers.size === 0) {
         this.subscribers.delete(topic);
-        if (this.stompClient?.connected) {
-          this.stompClient.unsubscribe(topic);
+        // Unsubscribe from STOMP using the stored subscription
+        const subscription = this.subscriptions.get(topic);
+        if (subscription) {
+          subscription.unsubscribe();
+          this.subscriptions.delete(topic);
+          console.log(`Unsubscribed from topic: ${topic}`);
         }
       }
     }
@@ -128,8 +157,44 @@ class WebSocketService {
     }
   }
 
+  unsubscribeFromChannel(channelId: number) {
+    const topicsToUnsubscribe: string[] = [];
+    
+    // Find all topics related to this channel
+    this.subscriptions.forEach((subscription, topic) => {
+      if (topic.includes(`/channels/${channelId}/`)) {
+        topicsToUnsubscribe.push(topic);
+      }
+    });
+    
+    // Unsubscribe from all channel-related topics
+    topicsToUnsubscribe.forEach(topic => {
+      const subscription = this.subscriptions.get(topic);
+      if (subscription) {
+        subscription.unsubscribe();
+        this.subscriptions.delete(topic);
+        this.subscribers.delete(topic);
+        console.log(`Unsubscribed from topic: ${topic}`);
+      }
+    });
+    
+    console.log(`Unsubscribed from all topics for channel ${channelId}`);
+  }
+
+  isConnected(): boolean {
+    return this.stompClient?.connected || false;
+  }
+
   disconnect() {
     if (this.stompClient) {
+      // Unsubscribe from all topics
+      this.subscriptions.forEach((subscription, topic) => {
+        subscription.unsubscribe();
+        console.log(`Unsubscribed from topic: ${topic} during disconnect`);
+      });
+      this.subscriptions.clear();
+      this.subscribers.clear();
+      
       this.stompClient.deactivate();
       this.stompClient = null;
       this.isConnecting = false;

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Typography, IconButton, Paper, Stack } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import AppModal from '../common/AppModal';
+import AppModal from '../AppModal';
 
 interface HubInfoModalProps {
   open: boolean;
@@ -82,15 +82,20 @@ const HubInfoModal: React.FC<HubInfoModalProps> = ({ open, onClose, hub, onSearc
             >
               <CloseIcon />
             </IconButton>
-            <IconButton
+            <Button
               onClick={handleJoinHub}
+              variant="contained"
               sx={{
-                color: 'primary.main',
-                '&:hover': { color: 'primary.dark' },
+                background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
+                color: '#fff',
+                fontWeight: 'bold',
+                '&:hover': {
+                  background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)',
+                },
               }}
             >
               Join Hub
-            </IconButton>
+            </Button>
           </Box>
         </Stack>
       </Paper>

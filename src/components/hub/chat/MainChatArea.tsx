@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Box, IconButton, Paper, Stack, Typography, Fade, Skeleton } from '@mui/material';
+import { Box, IconButton, Paper, Stack, Typography, Fade, Skeleton, List, ListItem, ListItemAvatar, ListItemText } from '@mui/material';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SendIcon from '@mui/icons-material/Send';
@@ -14,11 +14,14 @@ import * as Yup from 'yup';
 import { Channel, Message, ChannelType, useGetMessagesQuery, useCreateMessageMutation, useUpdateMessageMutation, useDeleteMessageMutation } from '../../../api/channels';
 import UserAvatar from '../../UserAvatar';
 import Input from '../../common/Input';
+import AppModal from '../../AppModal';
 import DOMPurify from 'dompurify';
 import { useNotification } from '@/context/NotificationContext';
 import { hasPermission } from '@/utils/rolePermissions';
 import { useWebSocket } from '@/websocket/useWebSocket';
 import { webSocketService } from '@/websocket/WebSocketService';
+import { useAppSelector } from '@/hooks/redux';
+import VirtualizedChatArea from './VirtualizedChatArea';
 
 enum MessageStatus {
   SENT = 0,
@@ -72,7 +75,7 @@ const isWithinTimeThreshold = (timestamp1: string, timestamp2: string, threshold
 
 interface MainChatAreaProps {
   activeChannel: Channel | null;
-  user: { id: number; login: string; avatar: string | null };
+  user: { id: number; login: string; avatar: string | null } | null;
   hubId: number;
   userPermissions: string[];
   isOwner: boolean;
@@ -85,20 +88,15 @@ const messageSchema = Yup.object().shape({
     .max(2000, 'Message is too long')
 });
 
-// Add type definitions for WebSocket messages
-interface StompMessage {
-  body: string;
-  headers: Record<string, string>;
-}
-
-interface StompFrame {
-  command: string;
-  headers: Record<string, string>;
-  body: string;
-}
 
 const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId, userPermissions, isOwner }) => {
-  const [sending, setSending] = useState(false);
+  const authToken = useAppSelector(state => state.auth.token);
+  
+  // Early return if user is null
+  if (!user) {
+    return null;
+  }
+  const [sending] = useState(false);
   const [messages, setMessages] = useState<ExtendedMessage[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ExtendedMessage | null>(null);
@@ -111,19 +109,21 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const [unreadMessages, setUnreadMessages] = useState<Set<number>>(new Set());
   const [unreadCount, setUnreadCount] = useState(0);
   const [hasNewMessage, setHasNewMessage] = useState(false);
-  const [newMessagesCount, setNewMessagesCount] = useState(0);
   const [highlightedMessages, setHighlightedMessages] = useState<Set<number>>(new Set());
   const [focusedMessageId, setFocusedMessageId] = useState<number | null>(null);
+  const [typingUsers, setTypingUsers] = useState<{id: number; login: string; avatar: string | null}[]>([]);
+  const [showTypingUsersModal, setShowTypingUsersModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const virtualizedChatRef = useRef<any>(null);
   const dateLabelTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isLoadingMoreRef = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const messagesLengthRef = useRef(0);
-  const [page, setPage] = useState(1);
+  // const [page, setPage] = useState(1);
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
-  const [readMessages, setReadMessages] = useState<Set<number>>(new Set());
+  // const [readMessages, setReadMessages] = useState<Set<number>>(new Set());
   const readMessagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const visibleMessagesRef = useRef<Set<number>>(new Set());
   const unreadMessagesBufferRef = useRef<Set<number>>(new Set());
@@ -152,21 +152,21 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const canSendMessages = hasPermission(userPermissions, 'SEND_MESSAGES', isOwner);
 
   // Функция для отписки от WebSocket топиков канала
-  const unsubscribeFromChannelTopics = useCallback((channel: Channel | null, userId: number | null, callback: (message: any) => void) => {
-    if (!channel) return;
+  // const unsubscribeFromChannelTopics = useCallback((channel: Channel | null, userId: number | null, callback: (message: any) => void) => {
+  //   if (!channel) return;
     
-    console.log(`Unsubscribing from all topics for channel ${channel.id}`);
+  //   console.log(`Unsubscribing from all topics for channel ${channel.id}`);
     
-    // Отписка от персональной очереди пользователя
-    if (userId) {
-      const userQueueTopic = `/v1/user/${userId}/queue/channels/${channel.id}/messages`;
-      webSocketService.unsubscribe(userQueueTopic, callback);
-    }
+  //   // Отписка от персональной очереди пользователя
+  //   if (userId) {
+  //     const userQueueTopic = `/v1/user/${userId}/queue/channels/${channel.id}/messages`;
+  //     webSocketService.unsubscribe(userQueueTopic, callback);
+  //   }
     
-    // Отписка от общего топика канала
-    const channelTopic = `/v1/topic/channels/${channel.id}/messages`;
-    webSocketService.unsubscribe(channelTopic, callback);
-  }, []);
+  //   // Отписка от общего топика канала
+  //   const channelTopic = `/v1/topic/channels/${channel.id}/messages`;
+  //   webSocketService.unsubscribe(channelTopic, callback);
+  // }, []);
   
   // Reset state when channel changes
   useEffect(() => {
@@ -186,10 +186,119 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         }
       }
     };
-  }, [activeChannel?.id, user?.id]);
+  }, [activeChannel?.id, user.id]);
   
-  // Инициализация при входе в новый канал
+  // Флаг для отслеживания текущего статуса печати
+  const isTypingRef = useRef(false);
+  // Таймер для обнаружения паузы в печати
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Таймер для периодической отправки статуса STARTED
+  const typingRefreshRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Функция для отправки статуса печати
+  const sendTypingStatus = useCallback((isTyping: boolean) => {
+    if (!activeChannel || !user) return;
+    
+    if (isTyping) {
+      // Если уже отправлен статус "печатает", просто обновляем таймер паузы
+      if (!isTypingRef.current) {
+        // Отправляем статус "начал печатать"
+        webSocketService.publish(`/app/v1/channels/${activeChannel.id}/typing`, {
+          typing_status: 0 // STARTED
+        });
+        isTypingRef.current = true;
+        
+        // Устанавливаем интервал для периодической отправки STARTED каждые 4 секунды
+        // Этот интервал создается только один раз при начале печати
+        typingRefreshRef.current = setInterval(() => {
+          webSocketService.publish(`/app/v1/channels/${activeChannel.id}/typing`, {
+            typing_status: 0 // STARTED
+          });
+        }, 4000);
+      }
+      
+      // Очищаем таймер паузы если он был (но не интервал!)
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      // Устанавливаем таймер на 2 секунды для определения паузы
+      typingTimeoutRef.current = setTimeout(() => {
+        // Если сработал таймер, значит 2 секунды не было изменений в поле
+        webSocketService.publish(`/app/v1/channels/${activeChannel.id}/typing`, {
+          typing_status: 1 // STOPPED
+        });
+        isTypingRef.current = false;
+        typingTimeoutRef.current = null;
+        
+        // Очищаем интервал периодической отправки
+        if (typingRefreshRef.current) {
+          clearInterval(typingRefreshRef.current);
+          typingRefreshRef.current = null;
+        }
+      }, 2000);
+    } else {
+      // Остановка печати (поле стало пустым или отправлено сообщение)
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      
+      if (typingRefreshRef.current) {
+        clearInterval(typingRefreshRef.current);
+        typingRefreshRef.current = null;
+      }
+      
+      if (isTypingRef.current) {
+        webSocketService.publish(`/app/v1/channels/${activeChannel.id}/typing`, {
+          typing_status: 1 // STOPPED
+        });
+        isTypingRef.current = false;
+      }
+    }
+  }, [activeChannel, user]);
+  
+  // Получение печатающих пользователей для канала
+  const fetchTypingUsers = useCallback(async (channelId: number) => {
+    console.log('Fetching typing users for channel:', channelId);
+    try {
+      if (!authToken) {
+        console.error('No JWT token found');
+        return;
+      }
+      
+      const response = await fetch(`/api/v1/channels/${channelId}/typing-users`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const typingUsersList = await response.json();
+        console.log('Received typing users:', typingUsersList);
+        const realUsers = typingUsersList.filter((u: {id: number}) => u.id !== user.id);
+        
+        setTypingUsers(realUsers);
+      } else {
+        console.error('Failed to fetch typing users:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('Failed to fetch typing users:', error);
+    }
+  }, [user.id, authToken]);
+
+  // Инициализация при входе в новый канал и отписка при выходе
   useEffect(() => {
+    // Store previous channel ID for cleanup
+    let previousChannelId: number | null = null;
+    
+    if (!activeChannel) {
+      return;
+    }
+    
+    console.log(`Entering channel ${activeChannel.id}`);
+    
     // Reset all states when channel changes
     setMessages([]);
     setHasMoreMessages(true);
@@ -199,35 +308,97 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setShowDateLabel(false);
     setShowScrollButton(false);
     setTempMessages(new Map());
-    setPage(1);
+    // setPage(1);
     setIsScrolledToBottom(true);
     isLoadingMoreRef.current = false;
-    setReadMessages(new Set());
-
-    // Force scroll to bottom after channel change
-    requestAnimationFrame(() => {
-      if (messagesContainerRef.current) {
-        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-      }
-    });
+    // setReadMessages(new Set());
+    setTypingUsers([]); // Сбрасываем список печатающих пользователей
+    
+    // Очищаем все таймеры и состояние печати
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    if (typingRefreshRef.current) {
+      clearInterval(typingRefreshRef.current);
+      typingRefreshRef.current = null;
+    }
+    
+    // Сбрасываем флаг печати
+    isTypingRef.current = false;
     
     // Mark all messages as read when entering a channel
-    if (activeChannel) {
-      webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
-    }
-  }, [activeChannel?.id]); // Using id instead of the full object
+    webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
+    
+    // Получаем список печатающих пользователей при входе в канал
+    fetchTypingUsers(activeChannel.id);
+    
+    previousChannelId = activeChannel.id;
+    
+    // Clean up function - runs when leaving the channel
+    return () => {
+      if (previousChannelId) {
+        console.log(`Leaving channel ${previousChannelId}`);
+        
+        // Unsubscribe from all WebSocket topics for this channel
+        webSocketService.unsubscribeFromChannel(previousChannelId);
+        
+        // Clear any typing status
+        if (isTypingRef.current) {
+          webSocketService.publish(`/app/v1/channels/${previousChannelId}/typing`, {
+            typing_status: 1 // STOPPED
+          });
+          isTypingRef.current = false;
+        }
+        
+        // Clear all timers
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = null;
+        }
+        if (typingRefreshRef.current) {
+          clearInterval(typingRefreshRef.current);
+          typingRefreshRef.current = null;
+        }
+        
+        // Clear typing users
+        setTypingUsers([]);
+      }
+    };
+  }, [activeChannel?.id, fetchTypingUsers]); // Using id instead of the full object
 
   // Simple function to scroll to bottom without marking messages as read
   const scrollToBottom = useCallback(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-      setShowScrollButton(false);
+    if (virtualizedChatRef.current) {
+      virtualizedChatRef.current.scrollToItem(messages.length - 1, 'end');
     }
-  }, []);
+  }, [messages.length]);
 
   // Function to scroll to bottom and mark all messages as read
   const handleScrollToBottom = useCallback(() => {
-    // Scroll to bottom first
+    // First, highlight unread messages before marking them as read
+    const unreadMessageIds = new Set<number>();
+    messages.forEach(msg => {
+      if (msg.author.id !== user.id && msg.status === MessageStatus.NEW) {
+        unreadMessageIds.add(msg.id);
+      }
+    });
+    
+    // Add all unread messages to highlighted set
+    if (unreadMessageIds.size > 0) {
+      setHighlightedMessages(prev => new Set([...prev, ...unreadMessageIds]));
+      
+      // Remove highlight after 1.5 seconds
+      setTimeout(() => {
+        setHighlightedMessages(prev => {
+          const newSet = new Set(prev);
+          unreadMessageIds.forEach(id => newSet.delete(id));
+          return newSet;
+        });
+      }, 1500);
+    }
+    
+    // Scroll to bottom
     scrollToBottom();
     
     // Send bulk-read-all request when scrolling to bottom
@@ -235,7 +406,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
       // Update all messages to READ status
       setMessages(prev => prev.map(msg => (
-        msg.author.id !== user.id 
+        msg.author.id !== user?.id 
           ? { ...msg, status: MessageStatus.READ }
           : msg
       )));
@@ -244,9 +415,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Update local state
     setUnreadMessages(new Set());
     setUnreadCount(0);
-    setNewMessagesCount(0);
     setHasNewMessage(false);
-  }, [activeChannel, user.id, scrollToBottom]);
+  }, [activeChannel, user?.id, scrollToBottom, messages]);
 
   // Helper function to convert Message to ExtendedMessage
   const convertToExtendedMessage = useCallback((message: Message): ExtendedMessage => {
@@ -263,6 +433,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Set empty messages array when data is empty
     if (!messagesData || messagesData.length === 0) {
       setMessages([]);
+      setUnreadMessages(new Set());
+      setUnreadCount(0);
+      setHasNewMessage(false);
       return;
     }
     
@@ -272,35 +445,69 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setMessages(extendedMessages);
       messagesLengthRef.current = messagesData.length;
       
-      // Check for unread messages in initial load
-      const unreadMessages = extendedMessages.filter(
-        msg => msg.status === MessageStatus.NEW && msg.author.id !== user.id
+      // Check for unread messages in initial load (only from other users)
+      const unreadMessagesFromOthers = extendedMessages.filter(
+        msg => msg.author.id !== user?.id && msg.status === MessageStatus.NEW
       );
       
-      if (unreadMessages.length > 0) {
-        setUnreadMessages(new Set(unreadMessages.map(msg => msg.id)));
-        setUnreadCount(unreadMessages.length);
+      if (unreadMessagesFromOthers.length > 0) {
+        setUnreadMessages(new Set(unreadMessagesFromOthers.map(msg => msg.id)));
+        setUnreadCount(unreadMessagesFromOthers.length);
+      } else {
+        setUnreadMessages(new Set());
+        setUnreadCount(0);
+        setHasNewMessage(false);
       }
       
-      // Scroll to bottom after loading initial messages
-      requestAnimationFrame(() => {
-        if (messagesContainerRef.current) {
-          messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      // Scroll to bottom after loading initial messages with multiple attempts
+      const scrollToBottomWithRetry = (attempts = 0) => {
+        if (attempts > 3) {
+          console.warn('Failed to scroll to bottom after 3 attempts');
+          return;
         }
-      });
+        
+        setTimeout(() => {
+          if (messagesContainerRef.current) {
+            const container = messagesContainerRef.current;
+            const scrollBefore = container.scrollTop;
+            container.scrollTop = container.scrollHeight;
+            
+            console.log('Scroll attempt', attempts + 1, {
+              scrollHeight: container.scrollHeight,
+              clientHeight: container.clientHeight,
+              scrollTop: container.scrollTop,
+              scrollBefore,
+              messagesCount: extendedMessages.length
+            });
+            
+            // Check if scroll was successful
+            if (container.scrollTop + container.clientHeight < container.scrollHeight - 50) {
+              // If not at bottom, retry
+              scrollToBottomWithRetry(attempts + 1);
+            }
+          }
+        }, 50 * (attempts + 1)); // Increasing delay with each attempt
+      };
+      
+      scrollToBottomWithRetry();
     }
-  }, [activeChannel, messagesData, beforeId, convertToExtendedMessage, user.id]);
+  }, [activeChannel, messagesData, beforeId, convertToExtendedMessage, user?.id]);
 
-  // Add effect to handle auto-scrolling when typing
+  // Add effect to ensure scrolling when messages update
   useEffect(() => {
-    if (messagesContainerRef.current) {
-      requestAnimationFrame(() => {
-        if (messagesContainerRef.current) {
-          messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-        }
-      });
+    if (messagesContainerRef.current && isScrolledToBottom) {
+      const container = messagesContainerRef.current;
+      const shouldScroll = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      
+      if (shouldScroll) {
+        requestAnimationFrame(() => {
+          if (messagesContainerRef.current) {
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+          }
+        });
+      }
     }
-  }, []); // Remove inputValue dependency since it's not being used
+  }, [messages.length, isScrolledToBottom]);
 
   // Add effect to focus input when chat is opened
   useEffect(() => {
@@ -346,6 +553,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
     // Clear the input field immediately
     resetForm();
+    
+    // Отправляем статус прекращения печати
+    sendTypingStatus(false);
     
     try {
       const tempId = Date.now();
@@ -416,7 +626,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         console.error('Failed to send message:', error);
       }
     }
-  }, [activeChannel, user, createMessage, focusMessageInput, notify]);
+  }, [activeChannel, user, createMessage, focusMessageInput, notify, sendTypingStatus, replyingToMessage]);
 
   const handleEditMessage = useCallback(async (values: { content: string }, { resetForm }: { resetForm: () => void }) => {
     if (!editingMessageId || !activeChannel) return;
@@ -577,11 +787,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             }
           }
           
-          // Highlight unread messages
+          // Highlight unread messages (but only for messages from other users)
           const messageId = parseInt(element.getAttribute('data-msg-id') || '0', 10);
           if (messageId) {
             const message = messages.find(m => m.id === messageId);
-            if (message && message.author.id !== user.id && message.status !== MessageStatus.READ) {
+            // Only highlight messages from other users that are NEW
+            if (message && message.author.id !== user?.id && message.status === MessageStatus.NEW) {
               // Add to highlighted set for visual effect
               setHighlightedMessages(prev => {
                 const newSet = new Set(prev);
@@ -629,52 +840,96 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       const container = messagesContainerRef.current;
       if (!container) return;
   
-      // Store the scroll height and scroll position BEFORE adding new messages
-      const scrollHeightBefore = container.scrollHeight;
-      const scrollPositionBefore = container.scrollTop;
+      // Save the first visible element before the update
+      const allMessages = container.querySelectorAll('.message-item');
+      let firstVisibleElement = null;
+      let offsetFromTop = 0;
+      
+      // Find the first element that's at least partially visible
+      for (const element of allMessages) {
+        const rect = element.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+          firstVisibleElement = element;
+          offsetFromTop = rect.top - containerRect.top;
+          break;
+        }
+      }
+      
+      const firstVisibleMessageId = firstVisibleElement?.getAttribute('data-msg-id');
       
       // Check if we received less messages than requested
       if (messagesData.length < MESSAGES_PER_PAGE) {
         setHasMoreMessages(false);
       }
-  
-      // Update the messages
-      setMessages((prev: ExtendedMessage[]) => {
-        // Create a map of existing messages for quick lookup
-        const existingMessagesMap = new Map(prev.map(msg => [msg.id, msg]));
+      
+      // Disable scrolling temporarily
+      const currentScrollBehavior = container.style.scrollBehavior;
+      container.style.scrollBehavior = 'auto';
+      
+      // Create a promise to handle DOM updates
+      const updatePromise = new Promise<void>((resolve) => {
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          resolve();
+        });
         
-        // Add new messages that don't exist yet
-        messagesData.forEach(newMsg => {
-          if (!existingMessagesMap.has(newMsg.id)) {
-            // Convert Message to ExtendedMessage by adding the required status property
-            existingMessagesMap.set(newMsg.id, {
-              ...newMsg,
-              status: MessageStatus.NEW // Set an appropriate default status
-            });
-          }
+        observer.observe(container, {
+          childList: true,
+          subtree: true
         });
-  
-        // Convert map back to array and sort by creation date
-        return Array.from(existingMessagesMap.values())
-          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        
+        // Update the messages
+        setMessages((prev: ExtendedMessage[]) => {
+          // Create a map of existing messages for quick lookup
+          const existingMessagesMap = new Map(prev.map(msg => [msg.id, msg]));
+          
+          // Add new messages that don't exist yet
+          messagesData.forEach(newMsg => {
+            if (!existingMessagesMap.has(newMsg.id)) {
+              // Convert Message to ExtendedMessage by adding the required status property
+              existingMessagesMap.set(newMsg.id, {
+                ...newMsg,
+                status: 'status' in newMsg ? (newMsg as any).status : 
+                        (newMsg.author.id === user?.id ? MessageStatus.SENT : MessageStatus.NEW)
+              });
+            }
+          });
+    
+          // Convert map back to array and sort by creation date
+          return Array.from(existingMessagesMap.values())
+            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        });
       });
-  
-      // Use a more direct approach to maintain scroll position
-      // Wait for the DOM to update with the new messages (both frames are critical)
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          // Get the new scroll height after adding messages
-          const scrollHeightAfter = container.scrollHeight;
+      
+      // Wait for DOM to update then restore scroll position
+      updatePromise.then(() => {
+        // Use setTimeout to ensure all layout calculations are complete
+        setTimeout(() => {
+          if (firstVisibleMessageId) {
+            const sameMessage = container.querySelector(`[data-msg-id="${firstVisibleMessageId}"]`);
+            if (sameMessage) {
+              const rect = sameMessage.getBoundingClientRect();
+              const containerRect = container.getBoundingClientRect();
+              const newOffsetFromTop = rect.top - containerRect.top;
+              const scrollAdjustment = newOffsetFromTop - offsetFromTop;
+              
+              // Apply the scroll adjustment with overflow hidden temporarily
+              container.style.overflow = 'hidden';
+              container.scrollTop += scrollAdjustment;
+              
+              // Force a reflow
+              void container.offsetHeight;
+              
+              // Restore overflow
+              container.style.overflow = 'auto';
+            }
+          }
           
-          // Calculate how much height was added at the top
-          const heightAdded = scrollHeightAfter - scrollHeightBefore;
-          
-          // Adjust the scroll position by the exact amount of height added
-          // This keeps the same content visible as before
-          container.scrollTop = scrollPositionBefore + heightAdded;
-          
+          // Restore scroll behavior
+          container.style.scrollBehavior = currentScrollBehavior;
           isLoadingMoreRef.current = false;
-        });
+        }, 0);
       });
     }
   }, [messagesData, beforeId]);
@@ -710,7 +965,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         
         // Update all messages to READ status
         setMessages(prev => prev.map(msg => (
-          msg.author.id !== user.id 
+          msg.author.id !== user?.id 
             ? { ...msg, status: MessageStatus.READ }
             : msg
         )));
@@ -718,7 +973,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         // Clear all unread indicators
         setUnreadMessages(new Set());
         setUnreadCount(0);
-        setNewMessagesCount(0);
         setHasNewMessage(false);
       }
     };
@@ -738,7 +992,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       const newMessage = convertToExtendedMessage(data.message);
       
       // Skip processing if the message is from the current user
-      if (newMessage.author.id === user.id) {
+      if (newMessage.author.id === user?.id) {
         return;
       }
       
@@ -767,117 +1021,86 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         });
       }, 1500);
       
-      // If user is at the bottom, immediately mark message as read
-      const container = messagesContainerRef.current;
-      if (container) {
-        const scrollPosition = container.scrollHeight - container.scrollTop - container.clientHeight;
-        const isAtBottom = scrollPosition < 100;
-        
-        if (isAtBottom && activeChannel) {
-          // Update message status to READ immediately
-          setMessages(prev => prev.map(msg => 
-            msg.id === newMessage.id && msg.author.id !== user.id
-              ? { ...msg, status: MessageStatus.READ }
-              : msg
-          ));
-          
-          // Add to buffer for marking as read on server
-          unreadMessagesBufferRef.current.add(newMessage.id);
-        }
-      }
-
-      // If message has NEW status
-      if (newMessage.status === MessageStatus.NEW) {
+      // Only process if message is from another user
+      if (newMessage.author.id !== user?.id) {
         const container = messagesContainerRef.current;
         if (container) {
           const scrollPosition = container.scrollHeight - container.scrollTop - container.clientHeight;
-          // Check if user is scrolled up significantly (more than 300px from bottom)
-          // or just a little bit (less than or equal to 300px from bottom)
-          const isScrolledUpSignificantly = scrollPosition > 300;
+          const isAtBottom = scrollPosition < 100;
           
           console.log('New message received:', {
-            isScrolledUpSignificantly,
+            isAtBottom,
             scrollPosition,
-            messageId: newMessage.id
+            messageId: newMessage.id,
+            status: newMessage.status
           });
 
-          if (isScrolledUpSignificantly) {
-            // Show new message indicator if scrolled up significantly
+          if (isAtBottom) {
+            // User is at bottom - immediately mark as read
+            setMessages(prev => prev.map(msg => 
+              msg.id === newMessage.id
+                ? { ...msg, status: MessageStatus.READ }
+                : msg
+            ));
+            
+            // Add to buffer for marking as read on server
+            unreadMessagesBufferRef.current.add(newMessage.id);
+            
+            // Auto-scroll to keep at bottom
+            requestAnimationFrame(() => {
+              if (container) {
+                container.scrollTop = container.scrollHeight;
+              }
+            });
+          } else {
+            // User is scrolled up - add to unread messages
             setHasNewMessage(true);
             setUnreadMessages(prev => {
               const newSet = new Set(prev);
               newSet.add(newMessage.id);
               return newSet;
             });
-            setUnreadCount(prev => prev + 1);
-            setNewMessagesCount(prev => prev + 1);
-            
-            // Check if the message is visible in the viewport despite being scrolled up
-            // This can happen if the user is scrolled up but the new message still appears at the bottom of the visible area
-            setTimeout(() => {
-              const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
-              if (messageElement) {
-                const rect = messageElement.getBoundingClientRect();
-                const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
-                
-                if (isVisible && activeChannel) {
-                  // If visible, add to buffer for marking as read
-                  unreadMessagesBufferRef.current.add(newMessage.id);
+            setUnreadCount(prev => {
+              const newCount = prev + 1;
+              
+              // Check if the message is visible despite being scrolled up
+              setTimeout(() => {
+                const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
+                if (messageElement && container) {
+                  const rect = messageElement.getBoundingClientRect();
+                  const containerRect = container.getBoundingClientRect();
+                  const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
                   
-                  // Update message status locally
-                  setMessages(prev => prev.map(msg => 
-                    msg.id === newMessage.id
-                      ? { ...msg, status: MessageStatus.READ }
-                      : msg
-                  ));
-                  
-                  // Update unread counters
-                  setUnreadMessages(prev => {
-                    const newSet = new Set(prev);
-                    newSet.delete(newMessage.id);
-                    return newSet;
-                  });
-                  setUnreadCount(prev => Math.max(0, prev - 1));
-                  setNewMessagesCount(prev => Math.max(0, prev - 1));
+                  if (isVisible) {
+                    // If visible, mark as read and update counters
+                    unreadMessagesBufferRef.current.add(newMessage.id);
+                    
+                    setMessages(prev => prev.map(msg => 
+                      msg.id === newMessage.id
+                        ? { ...msg, status: MessageStatus.READ }
+                        : msg
+                    ));
+                    
+                    setUnreadMessages(prev => {
+                      const newSet = new Set(prev);
+                      newSet.delete(newMessage.id);
+                      return newSet;
+                    });
+                    
+                    setUnreadCount(prev => {
+                      const updatedCount = Math.max(0, prev - 1);
+                      // If this was the last unread message, hide the indicator
+                      if (updatedCount === 0) {
+                        setHasNewMessage(false);
+                      }
+                      return updatedCount;
+                    });
+                  }
                 }
-              }
-            }, 100); // Small delay to ensure DOM is updated
-          } else {
-            // If at bottom or only scrolled up a little, auto-scroll to bottom and mark as read
-            if (activeChannel) {
-              // Add to buffer for marking as read
-              unreadMessagesBufferRef.current.add(newMessage.id);
+              }, 100);
               
-              // Auto-scroll to bottom
-              requestAnimationFrame(() => {
-                if (container) {
-                  container.scrollTop = container.scrollHeight;
-                  
-                  // Find the message element after scrolling
-                  setTimeout(() => {
-                    const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
-                    if (messageElement) {
-                      // Ensure the message is visible in the viewport
-                      messageElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
-                  }, 50);
-                }
-              });
-              
-              webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
-              // Update all messages to READ status
-              setMessages(prev => prev.map(msg => (
-                msg.author.id !== user.id 
-                  ? { ...msg, status: MessageStatus.READ }
-                  : msg
-              )));
-              
-              // Clear all unread indicators
-              setUnreadMessages(new Set());
-              setUnreadCount(0);
-              setNewMessagesCount(0);
-              setHasNewMessage(false);
-            }
+              return newCount;
+            });
           }
         }
       }
@@ -903,7 +1126,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           return newSet;
         });
         setUnreadCount(prev => Math.max(0, prev - 1));
-        setNewMessagesCount(prev => Math.max(0, prev - 1));
       }
     } else if (data.type === 'MESSAGE_DELETE' && data.messageId) {
       const { messageId } = data;
@@ -924,7 +1146,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         return newSet;
       });
       setUnreadCount(prev => Math.max(0, prev - 1));
-      setNewMessagesCount(prev => Math.max(0, prev - 1));
     } else if (data.type === 'MESSAGE_READ_STATUS' && data.message_range) {
       // Обработка сообщения о прочтении сообщений
       const { from, to } = data.message_range;
@@ -933,7 +1154,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setMessages(prevMessages => {
         return prevMessages.map(msg => {
           // Проверяем, что сообщение входит в диапазон и принадлежит текущему пользователю
-          if (msg.id >= from && msg.id <= to && msg.author.id === user.id) {
+          if (msg.id >= from && msg.id <= to && msg.author.id === user?.id) {
             // Увеличиваем счетчик прочтений на 1
             const currentCount = msg.read_by_count || 0;
             return {
@@ -947,11 +1168,45 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       console.log(`Обновлены счетчики прочтений для сообщений в диапазоне ${from}-${to}`);
     }
-  }, [isScrolledToBottom, user.id, activeChannel, convertToExtendedMessage]);
+  }, [isScrolledToBottom, user?.id, activeChannel, convertToExtendedMessage]);
+
+  // Обработчик сообщений о печати
+  const handleTypingMessage = useCallback((message: any) => {
+    // Проверяем, что сообщение имеет правильный формат
+    if (!message || !message.user || !message.user.id || !message.type || message.channelId !== activeChannel?.id) {
+      return;
+    }
+    
+    const typingUser = message.user;
+    
+    // Не показываем собственный статус печати
+    if (typingUser.id === user?.id) {
+      return;
+    }
+    
+    // Обрабатываем TYPING_STARTED
+    if (message.type === 'TYPING_STARTED') {
+      setTypingUsers(prev => {
+        // Проверяем, есть ли уже пользователь в списке
+        const existingUserIndex = prev.findIndex(u => u.id === typingUser.id);
+        if (existingUserIndex !== -1) {
+          return prev;
+        }
+        // Добавляем нового пользователя в конец списка
+        const newUsers = [...prev, typingUser];
+        // Сортируем по времени добавления (последние добавленные в конце)
+        return newUsers;
+      });
+    } 
+    // Обрабатываем TYPING_STOPPED
+    else if (message.type === 'TYPING_STOPPED') {
+      setTypingUsers(prev => prev.filter(u => u.id !== typingUser.id));
+    }
+  }, [user?.id, activeChannel?.id]);
 
   // Subscribe to user-specific queue
   useWebSocket(
-    activeChannel && user ? `/v1/user/${user.id}/queue/channels/${activeChannel.id}/messages` : null,
+    activeChannel && user ? `/v1/user/${user?.id}/queue/channels/${activeChannel.id}/messages` : null,
     handleNewMessage
   );
 
@@ -960,6 +1215,28 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     activeChannel ? `/v1/topic/channels/${activeChannel.id}/messages` : null,
     handleNewMessage
   );
+  
+  // Subscribe to typing indicator updates
+  useWebSocket(
+    activeChannel ? `/v1/topic/channels/${activeChannel.id}/typing` : null,
+    handleTypingMessage
+  );
+  
+  // Component unmount cleanup
+  useEffect(() => {
+    return () => {
+      // This will run only when the component unmounts completely
+      console.log('MainChatArea component unmounting');
+      
+      // Clear any remaining timers
+      if (readMessagesTimeoutRef.current) {
+        clearTimeout(readMessagesTimeoutRef.current);
+      }
+      if (dateLabelTimeoutRef.current) {
+        clearTimeout(dateLabelTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Setup debounced sending of unread messages
   useEffect(() => {
@@ -969,7 +1246,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     const sendBufferedUnreadMessages = () => {
       if (unreadMessagesBufferRef.current.size > 0) {
         const messageIds = Array.from(unreadMessagesBufferRef.current);
-        webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read`, { messageIds });
+        webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read`, { message_ids: messageIds });
         unreadMessagesBufferRef.current.clear();
       }
     };
@@ -999,7 +1276,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
               
               // If message is from other user and has status that is not READ
               const message = messages.find(m => m.id === messageId);
-              if (message && message.author.id !== user.id && message.status !== MessageStatus.READ) {
+              // Never highlight messages from current user
+              if (message && message.author.id !== user?.id && message.status === MessageStatus.NEW) {
                 // Add to buffer for debounced sending
                 unreadMessagesBufferRef.current.add(messageId);
                 
@@ -1033,8 +1311,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                   return newSet;
                 });
                 setUnreadCount(prev => Math.max(0, prev - 1));
-                setNewMessagesCount(prev => Math.max(0, prev - 1));
-              }
+                      }
               
               // If this was the last unread message, hide the notification
               if (unreadCount <= 1) {
@@ -1063,7 +1340,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         clearTimeout(readMessagesTimeoutRef.current);
       }
     };
-  }, [messages, user.id, activeChannel]);
+  }, [messages, user?.id, activeChannel]);
 
   // Remove old scroll-based read status handling
   useEffect(() => {
@@ -1079,31 +1356,26 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     return () => container.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      // Очищаем таймеры
-      if (readMessagesTimeoutRef.current) {
-        clearTimeout(readMessagesTimeoutRef.current);
-      }
-      
-      // Отписываемся от всех подписок при размонтировании компонента
-      if (activeChannel && user) {
-        console.log(`Component unmounting - unsubscribing from all topics for channel ${activeChannel.id}`);
-        
-        // Используем функцию отписки от топиков
-        unsubscribeFromChannelTopics(activeChannel, user.id, handleNewMessage);
-      }
-    };
-  }, [activeChannel, user, handleNewMessage, unsubscribeFromChannelTopics]);
 
   // Add effect to handle scroll to bottom
   useEffect(() => {
-    if (isScrolledToBottom) {
+    if (isScrolledToBottom && activeChannel) {
+      // When user scrolls to bottom, mark all messages as read
+      webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
+      
+      // Update all messages to READ status
+      setMessages(prev => prev.map(msg => (
+        msg.author.id !== user?.id 
+          ? { ...msg, status: MessageStatus.READ }
+          : msg
+      )));
+      
+      // Clear all unread indicators
+      setUnreadMessages(new Set());
+      setUnreadCount(0);
       setHasNewMessage(false);
-      setNewMessagesCount(0);
     }
-  }, [isScrolledToBottom]);
+  }, [isScrolledToBottom, activeChannel, user?.id]);
 
 
 
@@ -1128,18 +1400,392 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     </Box>
   );
 
-  const renderMessages = () => (
+  // Функция рендеринга отдельного сообщения для виртуальной прокрутки
+  const renderVirtualizedMessage = useCallback((message: ExtendedMessage, index: number, style: React.CSSProperties) => {
+    const isFirstOfGroup = index === 0 || 
+      sortedMessages[index - 1]?.author.id !== message.author.id ||
+      !isWithinTimeThreshold(sortedMessages[index - 1]?.created_at, message.created_at);
+    
+    const isTempMessage = message.id === -1;
+    
+    return (
+      <Box
+        style={style}
+        sx={{
+          px: 3,
+        }}
+      >
+        <Box
+          className="message-item"
+          data-date={message.created_at}
+          data-msg-id={message.id.toString()}
+          sx={{
+            display: 'flex',
+            gap: 2,
+            alignItems: 'flex-start',
+            position: 'relative',
+            borderRadius: '10px',
+            transition: 'background-color 0.3s ease',
+            opacity: isTempMessage ? 0.6 : 1,
+            backgroundColor: focusedMessageId === message.id
+              ? 'rgba(0, 207, 255, 0.25)'
+              : highlightedMessages.has(message.id)
+                ? 'rgba(255,105,180,0.2)'
+                : unreadMessages.has(message.id)
+                  ? 'rgba(25,118,210,0.1)'
+                  : 'transparent',
+            '&:hover': {
+              backgroundColor: focusedMessageId === message.id
+                ? 'rgba(0, 207, 255, 0.3)'
+                : highlightedMessages.has(message.id)
+                  ? 'rgba(255,105,180,0.25)'
+                  : unreadMessages.has(message.id) 
+                    ? 'rgba(25,118,210,0.15)' 
+                    : 'rgba(255,255,255,0.03)',
+            },
+            '&:hover .message-actions': {
+              opacity: isTempMessage ? 0 : 1,
+              pointerEvents: isTempMessage ? 'none' : 'auto',
+            },
+          }}
+        >
+          {/* Avatar */}
+          {isFirstOfGroup ? (
+            <Box 
+              sx={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                justifyContent: 'flex-start', 
+                width: 40,
+                ml: 1,
+                mt: 1,
+              }}
+            >
+              <div style={{ cursor: 'pointer' }}>
+                <UserAvatar 
+                  src={message.author.avatar || undefined} 
+                  alt={message.author.login} 
+                  userId={message.author.id}
+                  hubId={hubId}
+                />
+              </div>
+            </Box>
+          ) : (
+            <Box sx={{ width: 40, ml: 1, mt: 1 }} />
+          )}
+          
+          {/* Message content */}
+          <Box sx={{ flex: 1, position: 'relative' }}>
+            <Box sx={{ maxWidth: '100%' }}>
+              <Box sx={{ py: '5px', px: '0px', pl: 0 }}>
+                {isFirstOfGroup && (
+                  <Typography sx={{ color: '#00CFFF', fontWeight: 700, mb: 0.5, fontSize: '1rem', letterSpacing: 0.2 }}>
+                    {message.author.login}
+                  </Typography>
+                )}
+                {editingMessageId === message.id ? (
+                  // Edit form
+                  <Formik
+                    initialValues={{ content: message.content }}
+                    validationSchema={messageSchema}
+                    onSubmit={handleEditMessage}
+                  >
+                    {({ handleSubmit, values }) => (
+                      <Form>
+                        <Box sx={{ 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          gap: 1,
+                          background: 'rgba(30,30,47,0.9)',
+                          borderRadius: '8px',
+                          padding: '8px',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                        }}>
+                          <Field
+                            name="content"
+                            component={Input}
+                            multiline
+                            fullWidth
+                            size="small"
+                            inputRef={editInputRef}
+                            onKeyDown={(e: React.KeyboardEvent) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSubmit();
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setEditingMessageId(null);
+                              }
+                            }}
+                          />
+                          <Box sx={{ 
+                            display: 'flex', 
+                            gap: 1, 
+                            justifyContent: 'flex-end',
+                            padding: '4px 8px',
+                          }}>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => setEditingMessageId(null)}
+                              sx={{ 
+                                color: '#d32f2f',
+                                '&:hover': { background: 'rgba(211,47,47,0.1)' }
+                              }}
+                            >
+                              <CloseIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleSubmit()}
+                              disabled={!values.content}
+                              sx={{ 
+                                color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
+                                transition: 'color 0.25s cubic-bezier(.4,0,.2,1)',
+                                '&:hover': {
+                                  color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
+                                }
+                              }}
+                            >
+                              <SendIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </Box>
+                      </Form>
+                    )}
+                  </Formik>
+                ) : (
+                  // Message display
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    position: 'relative'
+                  }}>
+                    <Typography
+                      sx={{ 
+                        color: 'rgba(255,255,255,0.85)', 
+                        wordBreak: 'break-word', 
+                        fontSize: '1.01rem',
+                        whiteSpace: 'pre-wrap',
+                        pr: '120px',
+                        pl: 0,
+                        lineHeight: 1.4
+                      }}
+                      component="span"
+                      dangerouslySetInnerHTML={{
+                        __html: DOMPurify.sanitize(
+                          message.content.replace(/\r\n/g, '\n').replace(/\n/g, '<br>')
+                        )
+                      }}
+                    />
+                    <Box sx={{ 
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                      position: 'absolute',
+                      top: 0,
+                      right: 0,
+                    }}>
+                      {message.last_modified_at && message.last_modified_at !== message.created_at && (
+                        <span style={{ 
+                          color: '#90caf9', 
+                          fontSize: '0.85em', 
+                          fontStyle: 'italic',
+                          fontWeight: 500
+                        }}>ред.</span>
+                      )}
+                      {message.author.id === user?.id && (
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            mr: 0.5
+                          }}
+                        >
+                          <DoneAllIcon 
+                            sx={{ 
+                              fontSize: '1rem',
+                              color: message.read_by_count && message.read_by_count > 0 ? '#FF69B4' : 'rgba(255,255,255,0.35)'
+                            }} 
+                          />
+                        </Box>
+                      )}
+                      <Typography sx={{ 
+                        color: 'rgba(255,255,255,0.35)', 
+                        fontSize: '0.78rem', 
+                        lineHeight: 1,
+                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5
+                      }}>
+                        {formatMessageTime(message.created_at)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+            
+            {/* Message actions */}
+            {!isTempMessage && (
+              <Box
+                className="message-actions"
+                sx={{
+                  position: 'absolute',
+                  top: -38,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  display: 'flex',
+                  gap: 1,
+                  opacity: 0,
+                  pointerEvents: 'none',
+                  transition: 'opacity 0.2s',
+                  zIndex: 10,
+                  background: 'rgba(20,20,35,0.85)',
+                  borderRadius: 2,
+                  boxShadow: '0 8px 24px 0 rgba(0,0,0,0.3), 0 0 12px 0 rgba(149,128,255,0.2)',
+                  px: 1.5,
+                  py: 0.5,
+                  border: '1px solid rgba(149,128,255,0.25)',
+                  backdropFilter: 'blur(12px)',
+                }}
+              >
+                <IconButton 
+                  size="small" 
+                  onClick={() => setReplyingToMessage(message)} 
+                  sx={{ 
+                    color: '#00FFBA', 
+                    transition: 'all 0.2s ease',
+                    padding: '6px',
+                    backgroundColor: 'rgba(0, 255, 186, 0.12)',
+                    '&:hover': { 
+                      color: '#00FFBA',
+                      backgroundColor: 'rgba(0, 255, 186, 0.25)',
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 4px 8px rgba(0, 255, 186, 0.3)'
+                    } 
+                  }}
+                >
+                  <ReplyIcon fontSize="small" />
+                </IconButton>
+                
+                {message.author.id === user?.id && (
+                  <>
+                    <IconButton 
+                      size="small" 
+                      onClick={() => setEditingMessageId(message.id)} 
+                      sx={{ 
+                        color: '#00CFFF', 
+                        transition: 'all 0.2s ease',
+                        padding: '6px',
+                        backgroundColor: 'rgba(0, 207, 255, 0.12)',
+                        '&:hover': { 
+                          color: '#00CFFF',
+                          backgroundColor: 'rgba(0, 207, 255, 0.25)',
+                          transform: 'translateY(-2px)',
+                          boxShadow: '0 4px 8px rgba(0, 207, 255, 0.3)'
+                        } 
+                      }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton 
+                      size="small" 
+                      onClick={() => handleDeleteMessage(message.id)} 
+                      sx={{ 
+                        color: '#FF3D71', 
+                        transition: 'all 0.2s ease',
+                        padding: '6px',
+                        backgroundColor: 'rgba(255, 61, 113, 0.12)',
+                        '&:hover': { 
+                          color: '#FF3D71',
+                          backgroundColor: 'rgba(255, 61, 113, 0.25)',
+                          transform: 'translateY(-2px)',
+                          boxShadow: '0 4px 8px rgba(255, 61, 113, 0.3)'
+                        } 
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </>
+                )}
+              </Box>
+            )}
+          </Box>
+        </Box>
+      </Box>
+    );
+  }, [user?.id, hubId, focusedMessageId, highlightedMessages, unreadMessages, editingMessageId, sortedMessages, handleEditMessage, setEditingMessageId, setReplyingToMessage, handleDeleteMessage]);
+
+  const renderMessages = () => {
+    // Combine real and temporary messages
+    const allMessages = [...sortedMessages, ...Array.from(tempMessages.values())];
+    
+    if (allMessages.length === 0) {
+      return (
+        <Box sx={{ 
+          flex: 1,
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          color: 'rgba(255,255,255,0.5)',
+          textAlign: 'center',
+          gap: 2
+        }}>
+          <Typography variant="h6">
+            Нет сообщений
+          </Typography>
+          <Typography variant="body2">
+            Начните общение, отправив первое сообщение
+          </Typography>
+        </Box>
+      );
+    }
+    
+    return (
+      <VirtualizedChatArea
+        ref={virtualizedChatRef}
+        messages={allMessages}
+        isLoading={isLoading}
+        hasMore={hasMoreMessages}
+        onLoadMore={() => {
+          const oldestMessage = sortedMessages[0];
+          if (oldestMessage && !isLoadingMoreRef.current) {
+            setBeforeId(oldestMessage.id);
+          }
+        }}
+        currentUserId={user.id}
+        hubId={hubId}
+        renderMessage={renderVirtualizedMessage}
+        onScrollStateChange={(isAtBottom) => {
+          setIsScrolledToBottom(isAtBottom);
+          setShowScrollButton(!isAtBottom);
+        }}
+      />
+    );
+  };
+
+  const renderOldMessages = () => (
     <Box 
       ref={messagesContainerRef}
       className="messages-container"
       sx={{ 
         flex: 1, 
-        p: 3, 
+        minHeight: 0,
+        pt: 3,
+        px: 3,
+        pb: 8, // Увеличенный нижний padding
         overflowY: 'auto',
+        overflowX: 'hidden',
         display: 'flex',
         flexDirection: 'column',
         gap: 1,
         position: 'relative',
+        contain: 'layout', // Добавляем contain для оптимизации
         '&::-webkit-scrollbar': {
           width: '8px',
         },
@@ -1219,7 +1865,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             // Combine real and temporary messages
             const allMessages = [...sortedMessages, ...Array.from(tempMessages.values())];
             
-            allMessages.forEach((msg, idx) => {
+            allMessages.forEach((msg) => {
               const messageDate = new Date(msg.created_at);
               const messageDateString = messageDate.toDateString();
               
@@ -1324,18 +1970,18 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                     },
                   }}
                 >
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      alignItems: 'center', 
-                      justifyContent: 'flex-start', 
-                      width: 40,
-                      ml: 1,
-                      mt: 1,
-                    }}
-                  >
-                    {isFirstOfGroup ? (
+                  {isFirstOfGroup ? (
+                    <Box 
+                      sx={{ 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        alignItems: 'center', 
+                        justifyContent: 'flex-start', 
+                        width: 40,
+                        ml: 1,
+                        mt: 1,
+                      }}
+                    >
                       <div
                         style={{ cursor: 'pointer' }}
                       >
@@ -1346,8 +1992,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                           hubId={hubId}
                         />
                       </div>
-                    ) : null}
-                  </Box>
+                    </Box>
+                  ) : (
+                    <Box sx={{ width: 40, ml: 1, mt: 1 }} />
+                  )}
                   <Box sx={{ flex: 1, position: 'relative' }}>
                     <Box sx={{ maxWidth: '100%' }}>
                       <Box sx={{ py: '5px', px: '0px', pl: 0 }}>
@@ -1362,7 +2010,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                             validationSchema={messageSchema}
                             onSubmit={handleEditMessage}
                           >
-                            {({ handleSubmit, values, setFieldValue }) => (
+                            {({ handleSubmit, values }) => (
                               <Form>
                                 <Box sx={{ 
                                   display: 'flex', 
@@ -1399,8 +2047,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                   }}>
                                     <IconButton 
                                       size="small" 
-                                      onClick={(e: React.FormEvent) => {
-                                        e.preventDefault();
+                                      onClick={() => {
                                         setEditingMessageId(null);
                                       }}
                                       sx={{ 
@@ -1412,7 +2059,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                     </IconButton>
                                     <IconButton 
                                       size="small" 
-                                      onClick={(e: React.FormEvent) => handleSubmit()}
+                                      onClick={() => handleSubmit()}
                                       disabled={!values.content}
                                       sx={{ 
                                         color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
@@ -1468,7 +2115,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                   fontWeight: 500
                                 }}>ред.</span>
                               )}
-                              {msg.author.id === user.id && (
+                              {msg.author.id === user?.id && (
                                 <Box
                                   sx={{
                                     display: 'flex',
@@ -1543,7 +2190,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                           <ReplyIcon fontSize="small" />
                         </IconButton>
                         
-                        {msg.author.id === user.id && (
+                        {msg.author.id === user?.id && (
                           <>
                             <IconButton 
                               size="small" 
@@ -1601,6 +2248,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             return result;
           })()}
           
+          
           {/* For properly tracking the end of messages for scrolling */}
           <div ref={messagesEndRef} />
         </>
@@ -1614,6 +2262,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         flex: 1, 
         display: 'flex', 
         flexDirection: 'column',
+        height: '100%',
+        minHeight: 0,
         background: 'rgba(30,30,47,0.95)',
         backdropFilter: 'blur(10px)',
         position: 'relative',
@@ -1633,33 +2283,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
       {isLoading && !beforeId ? renderSkeleton() : renderMessages()}
 
-      {/* Scroll to bottom button */}
-      <Fade in={showScrollButton}>
-        <IconButton
-          onClick={handleScrollToBottom}
-          sx={{
-            position: 'absolute',
-            bottom: replyingToMessage ? 160 : 100, // Increased bottom margin when reply panel is visible
-            right: 20,
-            backgroundColor: 'rgba(30,30,47,0.95)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            '&:hover': {
-              backgroundColor: 'rgba(40,40,57,0.95)',
-            },
-            zIndex: 1000,
-            transition: 'bottom 0.2s ease-out', // Smooth transition for position change
-          }}
-        >
-          <KeyboardArrowDownIcon sx={{ color: '#fff' }} />
-        </IconButton>
-      </Fade>
-
-      {/* Removed duplicate unread messages indicator */}
-
       {/* New messages count indicator */}
-      <Fade in={newMessagesCount > 0 || unreadCount > 0}>
+      <Fade in={unreadCount > 0}>
         <Box
           sx={{
             position: 'absolute',
@@ -1690,13 +2315,120 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           >
             <KeyboardArrowDownIcon />
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {(newMessagesCount || unreadCount)} {(newMessagesCount || unreadCount) === 1 ? 'новое сообщение' : 'новых сообщений'}
+              {unreadCount} {unreadCount === 1 ? 'новое сообщение' : 'новых сообщений'}
             </Typography>
           </Paper>
         </Box>
       </Fade>
 
-      <Box sx={{ p: 2 }}>
+      <Box sx={{ p: 2, position: 'relative' }}>
+        {/* Индикатор типающих пользователей над полем ввода */}
+        {typingUsers.length > 0 && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: -40,
+              left: 20,
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: '#002B3D', // Темный непрозрачный фон
+              borderRadius: '24px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              border: '1px solid #00CFFF',
+              boxShadow: '0 4px 20px rgba(0, 207, 255, 0.3)',
+              zIndex: 10,
+              '&:hover': {
+                backgroundColor: '#003D52',
+                transform: 'translateY(-2px) scale(1.02)',
+                boxShadow: '0 6px 24px rgba(0, 207, 255, 0.4)',
+              }
+            }}
+            onClick={() => setShowTypingUsersModal(true)}
+          >
+            <Stack direction="row" spacing={-1.2} mr={1}>
+              {typingUsers.slice(0, 2).map((user, index) => (
+                <Box
+                  key={user.id}
+                  sx={{
+                    position: 'relative',
+                    zIndex: 2 - index,
+                  }}
+                >
+                  <UserAvatar
+                    src={user.avatar || undefined}
+                    alt={user.login}
+                    sx={{
+                      width: 28,
+                      height: 28,
+                      border: '2px solid #002B3D',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                    }}
+                  />
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      bottom: -2,
+                      right: -2,
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      backgroundColor: '#00FF94',
+                      border: '2px solid #002B3D',
+                    }}
+                  />
+                </Box>
+              ))}
+            </Stack>
+            <Box sx={{ display: 'flex', gap: '2px', ml: 0.5 }}>
+              {[1, 2, 3].map((dot) => (
+                <Box
+                  key={dot}
+                  sx={{
+                    width: '3px',
+                    height: '3px',
+                    borderRadius: '50%',
+                    backgroundColor: '#00CFFF',
+                    animation: 'bubble 1.4s ease-in-out infinite',
+                    animationDelay: `${(dot - 1) * 0.2}s`,
+                    '@keyframes bubble': {
+                      '0%, 60%, 100%': { 
+                        transform: 'scale(1)',
+                        opacity: 0.3,
+                      },
+                      '30%': { 
+                        transform: 'scale(1.4)',
+                        opacity: 1,
+                      },
+                    }
+                  }}
+                />
+              ))}
+            </Box>
+            {typingUsers.length > 2 && (
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#00CFFF',
+                  color: '#002B3D',
+                  borderRadius: '12px',
+                  padding: '2px 8px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  ml: 0.5,
+                  minWidth: '28px',
+                  height: '24px',
+                }}
+              >
+                +{typingUsers.length - 2}
+              </Box>
+            )}
+          </Box>
+        )}
+        
         {canSendMessages ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {replyingToMessage && (
@@ -1816,6 +2548,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                 background: 'rgba(255,255,255,0.05)',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: 3,
+                position: 'relative',
+                overflow: 'hidden',
               }}
             >
             <Formik
@@ -1852,11 +2586,24 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
                           handleSubmit();
+                          // Прекращаем печать при отправке сообщения
+                          sendTypingStatus(false);
+                        }
+                      }}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        const content = e.target.value;
+                        setFieldValue('content', content);
+                        
+                        // Отправляем статус печати если есть текст
+                        if (content.trim().length > 0) {
+                          sendTypingStatus(true);
+                        } else {
+                          sendTypingStatus(false);
                         }
                       }}
                     />
                   </Form>
-                  <Stack direction="row" spacing={1}>
+                  <Stack direction="row" spacing={1} alignItems="center">
                     <IconButton size="small" sx={{ color: '#FF69B4' }}>
                       <EmojiEmotionsIcon />
                     </IconButton>
@@ -1901,6 +2648,105 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           </Paper>
         )}
       </Box>
+      
+      {/* Модальное окно со всеми типающими пользователями */}
+      <AppModal
+        open={showTypingUsersModal}
+        onClose={() => setShowTypingUsersModal(false)}
+        title="Пользователи, которые печатают"
+        
+      >
+        <List 
+          sx={{ 
+            pt: 0,
+            maxHeight: '400px',
+            overflowY: 'auto',
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              background: 'rgba(255,255,255,0.05)',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              background: 'rgba(255,255,255,0.1)',
+              borderRadius: '4px',
+              '&:hover': {
+                background: 'rgba(255,255,255,0.15)',
+              },
+            },
+          }}
+        >
+          {typingUsers.map((user) => (
+            <ListItem key={user.id}>
+              <ListItemAvatar>
+                <UserAvatar 
+                  src={user.avatar || undefined}
+                  alt={user.login}
+                  sx={{ width: 40, height: 40 }}
+                />
+              </ListItemAvatar>
+              <ListItemText 
+                primary={
+                  <Typography sx={{ color: 'rgba(255,255,255,0.9)' }}>
+                    {user.login}
+                  </Typography>
+                }
+                secondary={
+                  <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                    <Box component="span" sx={{ display: 'flex', gap: '2px' }}>
+                      {[1, 2, 3].map((dot) => (
+                        <Box
+                          component="span"
+                          key={dot}
+                          sx={{
+                            display: 'inline-block',
+                            width: '4px',
+                            height: '4px',
+                            borderRadius: '50%',
+                            backgroundColor: '#00CFFF',
+                            animation: 'bubble 1.4s ease-in-out infinite',
+                            animationDelay: `${(dot - 1) * 0.2}s`,
+                            '@keyframes bubble': {
+                              '0%, 60%, 100%': { 
+                                transform: 'scale(1)',
+                                opacity: 0.3,
+                              },
+                              '30%': { 
+                                transform: 'scale(1.4)',
+                                opacity: 1,
+                              },
+                            }
+                          }}
+                        />
+                      ))}
+                    </Box>
+                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>
+                      печатает...
+                    </span>
+                  </Box>
+                }
+              />
+            </ListItem>
+          ))}
+          {typingUsers.length === 0 && (
+            <ListItem>
+              <ListItemText 
+                primary={
+                  <Typography sx={{ color: 'rgba(255,255,255,0.9)' }}>
+                    Никто не печатает
+                  </Typography>
+                }
+                secondary={
+                  <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.875rem' }}>
+                    В данный момент никто не набирает сообщение
+                  </Typography>
+                }
+              />
+            </ListItem>
+          )}
+        </List>
+      </AppModal>
     </Box>
   );
 };

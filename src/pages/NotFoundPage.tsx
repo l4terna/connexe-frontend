@@ -4,29 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import Sidebar from '../components/Sidebar';
 import { useGetHubsQuery } from '../api/hubs';
-
-const getUser = () => {
-  try {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    return {
-      id: user.id || 0,
-      login: user.login || '',
-      avatar: typeof user.avatar === 'string' ? user.avatar : null
-    };
-  } catch {
-    return {
-      id: 0,
-      login: '',
-      avatar: null
-    };
-  }
-};
-
-const user = getUser();
+import { useAppSelector } from '@/hooks/redux';
 
 const NotFoundPage: React.FC = () => {
   const navigate = useNavigate();
   const { data: hubs = [] } = useGetHubsQuery({});
+  const currentUser = useAppSelector(state => state.user.currentUser);
 
   return (
     <Box sx={{ 
@@ -37,7 +20,7 @@ const NotFoundPage: React.FC = () => {
     }}>
       {/* Sidebar */}
       <Sidebar
-        user={user}
+        user={currentUser || { id: 0, login: '', avatar: null }}
         hubs={hubs}
         onAdd={() => {}}
         selectedHubId={null}

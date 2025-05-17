@@ -27,6 +27,7 @@ import {
   Alert
 } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ROUTES } from '@/router/paths';
 import SearchIcon from '@mui/icons-material/Search';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -47,6 +48,7 @@ import { useNotification } from '../context/NotificationContext';
 import { useHubContext } from '../context/HubContext';
 import * as Yup from 'yup';
 import { hasPermission, isHubOwner } from '../utils/rolePermissions';
+import { useAppSelector } from '../hooks/redux';
 
 // Common styles
 const commonStyles = {
@@ -110,15 +112,6 @@ const commonStyles = {
   }
 };
 
-const getUser = () => {
-  try {
-    return JSON.parse(localStorage.getItem('user') || '{}');
-  } catch {
-    return {};
-  }
-};
-
-const user = getUser();
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -174,6 +167,7 @@ const deleteHubSchema = Yup.object().shape({
 const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
   const { hubId } = useParams<{ hubId: string }>();
   const navigate = useNavigate();
+  const currentUser = useAppSelector(state => state.user.currentUser);
   const [tab, setTab] = useState(0);
   const [currentTabHash, setCurrentTabHash] = useState('main');
   const [isCreateInviteModalOpen, setIsCreateInviteModalOpen] = useState(false);
@@ -424,8 +418,9 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
     try {
       await deleteHub(Number(hubId)).unwrap();
       setDeleteHubModalOpen(false);
-      navigate('/');
       notify('Хаб успешно удален', 'success');
+      // Navigate to main page using React Router
+      navigate('/', { replace: true });
     } catch (error) {
       console.error('Error deleting hub:', error);
       notify('Ошибка при удалении хаба', 'error');
@@ -443,7 +438,9 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ru}>
       <Box sx={{ 
+        flex: 1,
         display: 'flex',
+        flexDirection: 'column',
         height: '100vh', 
         background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
         position: 'relative',
@@ -458,15 +455,6 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
           zIndex: 0,
         }
       }}>
-        <Sidebar
-          user={user}
-          hubs={hubs}
-          onAdd={() => {}}
-          onSelect={(hub) => navigate(`/hub/${hub.id}`)}
-          selectedHubId={hub.id}
-        />
-
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1 }}>
           <Box
             sx={{
               height: 64,
@@ -587,13 +575,14 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
                         onClick={handleSaveHubSettings}
                         disabled={!hasChanges}
                         sx={{
-                          background: hasChanges ? '#FF69B4' : 'rgba(255,255,255,0.05)',
+                          background: hasChanges ? 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)' : 'rgba(255,255,255,0.05)',
+                          color: '#fff',
                           '&:disabled': {
                             background: 'rgba(255,255,255,0.2)',
                             color: 'rgba(255,255,255,0.5)'
                           },
                           '&:hover': {
-                            background: hasChanges ? '#C71585' : 'rgba(255,255,255,0.05)'
+                            background: hasChanges ? 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)' : 'rgba(255,255,255,0.05)'
                           },
                           transition: 'all 0.2s ease',
                           opacity: hasChanges ? 1 : 0.7,
@@ -623,7 +612,6 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
               </Box>
             </Paper>
           </Box>
-        </Box>
 
         <AppModal
           open={isCreateInviteModalOpen}
@@ -732,9 +720,10 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
                       variant="contained" 
                       disabled={Boolean(isCreateDisabled)}
                       sx={{
-                        background: commonStyles.accentColor,
+                        background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
+                        color: '#fff',
                         '&:hover': {
-                          background: 'rgba(255,105,180,0.8)'
+                          background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)'
                         }
                       }}
                     >
@@ -759,7 +748,7 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
             setDeleteConfirmOpen(false);
             setInviteToDelete(null);
           }}
-          maxWidth="xs"
+          
           title="Удалить приглашение?"
           sx={commonStyles.modalStyles}
         >
@@ -803,7 +792,7 @@ const HubSettings: React.FC<HubSettingsProps> = ({ hubPageRef }) => {
         <AppModal
           open={deleteHubModalOpen}
           onClose={() => setDeleteHubModalOpen(false)}
-          maxWidth="xs"
+          
           title="Удалить хаб?"
           sx={{
             ...commonStyles.modalStyles,

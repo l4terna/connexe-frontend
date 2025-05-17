@@ -153,7 +153,6 @@ const SortableCategory: React.FC<SortableCategoryProps> = ({ category, children,
                 variant="subtitle2"
                 sx={{
                   color: isDragging ? 'rgba(255,105,180,0.9)' : 'rgba(255,255,255,0.7)',
-                  textTransform: 'uppercase',
                   letterSpacing: 1,
                   fontWeight: 700,
                   transition: 'all 0.2s ease',

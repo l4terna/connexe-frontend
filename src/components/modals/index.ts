@@ -1,2 +1,1 @@
-export { default as AppModal } from './AppModal';
-export { default as SearchModal } from './SearchModal'; 
+export { default as HubSearchModal } from './HubSearchModal'; 

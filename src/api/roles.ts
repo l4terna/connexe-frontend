@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api } from '@/api/api';
 
 export interface Role {
   id: number;
@@ -19,6 +19,7 @@ export interface UpdateRoleDTO {
   permissions?: string;
 }
 
+// Generic paginated response interface that can be reused across the API
 export interface PaginatedResponse<T> {
   content: T[];
   totalElements: number;
@@ -30,7 +31,13 @@ export interface PaginatedResponse<T> {
 
 export const rolesApi = api.injectEndpoints({
   endpoints: (builder) => ({
-    getRoles: builder.query<PaginatedResponse<Role>, { hubId: number; page?: number; size?: number; excludedMemberRolesById?: number; s?: string }>({
+    getRoles: builder.query<PaginatedResponse<Role>, { 
+      hubId: number; 
+      page?: number; 
+      size?: number; 
+      excludedMemberRolesById?: number; 
+      s?: string 
+    }>({
       query: ({ hubId, page = 0, size = 30, excludedMemberRolesById, s }) => ({
         url: `/api/v1/hubs/${hubId}/roles`,
         method: 'GET',
@@ -49,7 +56,6 @@ export const rolesApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, { hubId }) => [
         { type: 'Role', id: `${hubId}-*` }
       ],
-
     }),
     updateRole: builder.mutation<Role, { hubId: number; roleId: number; data: UpdateRoleDTO }>({
       query: ({ hubId, roleId, data }) => ({
@@ -105,4 +111,4 @@ export const {
   useDeleteRoleMutation,
   useAssignRoleMutation,
   useRemoveRoleMutation,
-} = rolesApi; 
+} = rolesApi;

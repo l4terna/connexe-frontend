@@ -35,6 +35,7 @@ const UserProfileTooltip: React.FC<UserProfileTooltipProps> = ({
   const [isVisible, setIsVisible] = useState(false);
   const { data: profile, isLoading, isError } = useGetUserProfileQuery({ userId, hubId });
 
+
   useEffect(() => {
     setIsVisible(true);
   }, []);
@@ -111,7 +112,11 @@ const UserProfileTooltip: React.FC<UserProfileTooltipProps> = ({
       className={className} 
       sx={commonStyles}
     >
-      <UserProfileHeader profile={profile} hubId={hubId} />
+      <UserProfileHeader 
+        profile={profile} 
+        hubId={hubId} 
+        presence={profile.user.presence || profile.hub_member.user?.presence} 
+      />
       <UserRolesList 
         roles={profile.hub_member.roles || []}
         hubId={hubId}

@@ -95,7 +95,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ open, onClose }) => {
       <AppModal
         open={open}
         onClose={onClose}
-        maxWidth="sm"
+        
         title="Поиск"
       >
         <Tabs

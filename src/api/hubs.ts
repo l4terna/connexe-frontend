@@ -1,4 +1,6 @@
-import { api } from './api';
+import { api } from '@/api/api';
+import { Role } from '@/api/roles';
+import { HubMember } from '@/api/users';
 
 const API_URL = '/api/v1/hubs';
 
@@ -6,26 +8,26 @@ export interface Hub {
   id: number;
   name: string;
   type: string;
-  is_private: boolean;
+  is_private: boolean; // Note: API uses snake_case (is_private) but we keep it as is for consistency
   avatar?: string;
-  member_count?: number;
+  member_count?: number; // Note: API uses snake_case (member_count) but we keep it as is for consistency
 }
 
-export interface Role {
-  id: number;
-  name: string;
-  color: string;
-  permissions: string;
-}
-
-export interface HubMember {
+// This HubMember interface is specific to hub context and different from the one in users.ts
+export interface HubMemberResponse {
   id: number;
   hub_id: number;
   user_id: number;
   roles: Role[];
   is_owner: boolean;
-  joinedAt: string;
-  // Add other relevant fields
+  joined_at: string;
+  user?: {
+    id: number;
+    login: string;
+    avatar: string | null;
+    online?: boolean;
+    presence?: string;
+  };
 }
 
 export interface CreateInviteDTO {
@@ -85,6 +87,15 @@ export interface UpdateHubDTO {
 
 export type UpdateHubData = UpdateHubDTO | FormData;
 
+export interface HubsResponse {
+  content: Hub[];
+  totalElements: number;
+  totalPages: number;
+  size: number;
+  number: number;
+  last: boolean;
+}
+
 export const hubsApi = api.injectEndpoints({
   endpoints: (builder) => ({
     createHub: builder.mutation<Hub, FormData>({
@@ -115,7 +126,8 @@ export const hubsApi = api.injectEndpoints({
           name: params.name
         }
       }),
-      transformResponse: (response: any) => response.content as Hub[],
+      transformResponse: (response: HubsResponse) => response.content,
+      providesTags: ['Hub'],
       keepUnusedDataFor: 0,
       serializeQueryArgs: ({ queryArgs }) => {
         return queryArgs;
@@ -132,6 +144,22 @@ export const hubsApi = api.injectEndpoints({
         url: `${API_URL}/${hubId}/members`,
         params: after ? { after } : undefined
       }),
+      transformResponse: (response: HubMemberResponse[]) => {
+        // Transform API response to match HubMember interface from users.ts
+        return response.map(member => ({
+          id: member.id,
+          hub_id: member.hub_id,
+          user_id: member.user_id,
+          joined_at: member.joined_at,
+          is_owner: member.is_owner,
+          roles: member.roles,
+          user: member.user || {
+            id: member.user_id,
+            login: `User ${member.user_id}`,
+            avatar: null
+          }
+        } as HubMember & { hub_id: number; user_id: number; is_owner: boolean }));
+      },
       keepUnusedDataFor: 0,
       serializeQueryArgs: ({ queryArgs }) => {
         return queryArgs;
@@ -159,7 +187,6 @@ export const hubsApi = api.injectEndpoints({
           sort: 'createdAt,desc'
         }
       }),
-
     }),
     deleteInvite: builder.mutation<void, { hubId: number; inviteId: number }>({
       query: ({ hubId, inviteId }) => ({

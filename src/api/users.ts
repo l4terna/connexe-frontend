@@ -1,18 +1,14 @@
-import { api } from './api';
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import { api } from '@/api/api';
+import { Role } from '@/api/roles';
+import { PaginatedResponse } from '@/api/roles';
 
 export interface User {
   id: number;
   login: string;
   avatar: string | null;
   status?: string;
-}
-
-export interface Role {
-  id: number;
-  name: string;
-  color: string;
-  permissions: string;
+  online?: boolean;
+  presence?: string;
 }
 
 export interface HubMember {
@@ -20,6 +16,10 @@ export interface HubMember {
   joined_at: string;
   user: User;
   roles?: Role[];
+  online?: boolean;
+  user_id?: number;
+  hub_id?: number;
+  is_owner?: boolean;
 }
 
 export interface UserProfile {
@@ -29,6 +29,15 @@ export interface UserProfile {
 
 export const usersApi = api.injectEndpoints({
   endpoints: (builder) => ({
+    getCurrentUser: builder.query<User, void>({
+      query: () => ({
+        url: '/api/v1/users/@me',
+        method: 'GET',
+      }),
+      transformResponse: (response: any) => {
+        return response;
+      },
+    }),
     searchUsers: builder.query<User[], string>({
       query: (login) => ({
         url: '/api/v1/users',
@@ -39,9 +48,9 @@ export const usersApi = api.injectEndpoints({
           sort: 'createdAt,desc'
         }
       }),
-      transformResponse: (response: any) => {
+      transformResponse: (response: PaginatedResponse<User>) => {
         if (response && Array.isArray(response.content)) {
-          return response.content as User[];
+          return response.content;
         }
         return [];
       },
@@ -59,4 +68,4 @@ export const usersApi = api.injectEndpoints({
   }),
 });
 
-export const { useSearchUsersQuery, useGetUserProfileQuery } = usersApi; 
+export const { useGetCurrentUserQuery, useSearchUsersQuery, useGetUserProfileQuery } = usersApi;

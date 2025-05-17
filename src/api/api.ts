@@ -1,5 +1,8 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import { RootState } from '../store';
+import { store } from '@/store';
+import { clearUser } from '@/store/userSlice';
+import { clearToken, setToken as setAuthToken } from '@/store/authSlice';
+import { navigateTo } from '@/store/navigationMiddleware';
 
 declare global {
   interface Window {
@@ -14,11 +17,16 @@ window.notify = (msg, sev = 'error') => {
   if (window.__notify) window.__notify(msg, sev);
 };
 
-export const getToken = () => localStorage.getItem('jwt');
-export const setToken = (token: string) => localStorage.setItem('jwt', token);
+export const getToken = (): string | null => store.getState().auth.token;
+export const setToken = (token: string): void => {
+  store.dispatch(setAuthToken(token));
+};
 
-const baseQuery = fetchBaseQuery({
-  baseUrl: '/',
+// Base URL for API requests - ensure it's consistent across the app
+const API_BASE_URL = '/';
+
+export const baseQuery = fetchBaseQuery({
+  baseUrl: API_BASE_URL,
   prepareHeaders: (headers) => {
     const token = getToken();
     if (token) {
@@ -48,15 +56,15 @@ export const api = createApi({
           result = await baseQuery(args, api, extraOptions);
         } else {
           // If refresh fails, clear token and redirect to login
-          localStorage.removeItem('jwt');
-          localStorage.removeItem('user');
-          window.location.href = '/auth/login';
+          store.dispatch(clearToken());
+          store.dispatch(clearUser());
+          store.dispatch(navigateTo('/auth/login'));
         }
       } catch (error) {
         // If refresh fails, clear token and redirect to login
-        localStorage.removeItem('jwt');
-        localStorage.removeItem('user');
-        window.location.href = '/auth/login';
+        store.dispatch(clearToken());
+        store.dispatch(clearUser());
+        store.dispatch(navigateTo('/auth/login'));
       }
     }
     
@@ -66,39 +74,69 @@ export const api = createApi({
   tagTypes: ['User', 'Hub', 'Channel', 'Role', 'Category', 'UserProfile', 'HubMember'],
 });
 
+// Create a helper API for one-off requests that don't need endpoints
+export const oneOffApi = createApi({
+  reducerPath: 'oneOffApi',
+  baseQuery: baseQuery,
+  endpoints: (builder) => ({
+    query: builder.query({
+      query: (arg) => arg,
+    }),
+  }),
+});
+
+// Export middleware
 export const { middleware } = api;
 
-export const apiRequest = async (
+// Export utility endpoints for direct usage
+export const { useQueryQuery } = oneOffApi;
+
+// Helper function that uses RTK Query instead of fetch
+export const apiRequest = async <T = any>(
   path: string,
-  options: any = {},
-  auth: boolean = true
-) => {
+  options: Omit<RequestInit, 'body'> & { body?: any } = {}
+): Promise<T> => {
   try {
-    const headers: Record<string, string> = { ...options.headers };
-    if (auth) {
-      const token = getToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+    // Create a properly formatted path
+    const url = path.startsWith('http') 
+      ? path 
+      : path.startsWith('/') 
+        ? path.substring(1) 
+        : path;
+    
+    const method = options.method || 'GET';
+    
+    // Create a proper RTK Query request object
+    const request = {
+      url,
+      method,
+      body: options.body,
+      headers: options.headers,
+    };
+    
+    // Use the main API's baseQuery directly
+    const result = await baseQuery(request, {
+      signal: new AbortController().signal,
+      dispatch: () => {},
+      getState: () => ({}),
+      abort: () => {},
+      extra: undefined,
+      endpoint: '',
+      type: 'query',
+    }, {});
+    
+    if (result.error) {
+      throw new Error(`API error: ${JSON.stringify(result.error)}`);
     }
-    const response = await fetch(path, {
-      ...options,
-      headers,
-      credentials: 'include',
-    });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    // Store user data if present
+    if (result.data && typeof result.data === 'object' && 'user' in result.data) {
+      store.dispatch({ type: 'user/setUser', payload: result.data.user });
     }
     
-    const data = await response.json();
-    
-    // Сохраняем user если есть
-    if (data && data.user) {
-      localStorage.setItem('user', JSON.stringify(data.user));
-    }
-    
-    return data;
-  } catch (e: any) {
+    return result.data as T;
+  } catch (e: Error | unknown) {
     window.notify && window.notify('Произошла ошибка запроса. Попробуйте позже!', 'error');
     throw e;
   }
-}; 
+};

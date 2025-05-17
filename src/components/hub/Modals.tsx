@@ -81,7 +81,7 @@ const Modals: React.FC<ModalsProps> = ({
   return (
     <>
       {/* Create Category Modal */}
-      <AppModal open={createCategoryOpen} onClose={() => setCreateCategoryOpen(false)} maxWidth="xs" title="Создать категорию">
+      <AppModal open={createCategoryOpen} onClose={() => setCreateCategoryOpen(false)}  title="Создать категорию">
         <TextField
           autoFocus
           margin="dense"
@@ -99,12 +99,12 @@ const Modals: React.FC<ModalsProps> = ({
         />
         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
           <Button onClick={() => setCreateCategoryOpen(false)} sx={{ color: '#B0B0B0' }}>Отмена</Button>
-          <Button onClick={handleCreateCategory} variant="contained" color="primary" disabled={createCategoryLoading}>Создать</Button>
+          <Button onClick={handleCreateCategory} variant="contained" sx={{ background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)', color: '#fff', '&:hover': { background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)' } }} disabled={createCategoryLoading}>Создать</Button>
         </Box>
       </AppModal>
 
       {/* Create Channel Modal */}
-      <AppModal open={createChannelOpen} onClose={() => setCreateChannelOpen(false)} maxWidth="xs" title="Создать канал">
+      <AppModal open={createChannelOpen} onClose={() => setCreateChannelOpen(false)}  title="Создать канал">
         <TextField
           autoFocus
           margin="dense"
@@ -138,7 +138,7 @@ const Modals: React.FC<ModalsProps> = ({
           <Button 
             onClick={handleCreateChannel} 
             variant="contained" 
-            color="primary"
+            sx={{ background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)', color: '#fff', '&:hover': { background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)' } }}
             disabled={createChannelLoading}
           >
             Создать
@@ -147,7 +147,7 @@ const Modals: React.FC<ModalsProps> = ({
       </AppModal>
 
       {/* Category Settings Modal */}
-      <AppModal open={categorySettingsOpen} onClose={() => setCategorySettingsOpen(false)} maxWidth="xs" title="Настройки категории">
+      <AppModal open={categorySettingsOpen} onClose={() => setCategorySettingsOpen(false)}  title="Настройки категории">
         <TextField
           autoFocus
           margin="dense"
@@ -174,12 +174,12 @@ const Modals: React.FC<ModalsProps> = ({
         </Button>
         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
           <Button onClick={() => setCategorySettingsOpen(false)} sx={{ color: '#B0B0B0' }}>Отмена</Button>
-          <Button onClick={handleCategorySettingsSave} variant="contained" color="primary" disabled={categorySettingsLoading}>Сохранить</Button>
+          <Button onClick={handleCategorySettingsSave} variant="contained" sx={{ background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)', color: '#fff', '&:hover': { background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)' } }} disabled={categorySettingsLoading}>Сохранить</Button>
         </Box>
       </AppModal>
 
       {/* Channel Settings Modal */}
-      <AppModal open={channelSettingsOpen} onClose={() => setChannelSettingsOpen(false)} maxWidth="xs" title="Настройки канала">
+      <AppModal open={channelSettingsOpen} onClose={() => setChannelSettingsOpen(false)}  title="Настройки канала">
         <TextField
           autoFocus
           margin="dense"
@@ -206,7 +206,7 @@ const Modals: React.FC<ModalsProps> = ({
         </Button>
         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
           <Button onClick={() => setChannelSettingsOpen(false)} sx={{ color: '#B0B0B0' }}>Отмена</Button>
-          <Button onClick={handleChannelSettingsSave} variant="contained" color="primary" disabled={channelSettingsLoading}>Сохранить</Button>
+          <Button onClick={handleChannelSettingsSave} variant="contained" sx={{ background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)', color: '#fff', '&:hover': { background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)' } }} disabled={channelSettingsLoading}>Сохранить</Button>
         </Box>
       </AppModal>
     </>

@@ -352,7 +352,13 @@ const RolesManager: React.FC<RolesManagerProps> = ({ hubId, isActive }) => {
             setSelectedPermissions([]);
             setIsCreateRoleModalOpen(true);
           }}
-          sx={commonStyles.createButton}
+          sx={{
+            background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
+            color: '#fff',
+            '&:hover': {
+              background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)',
+            }
+          }}
         >
           Создать
         </Button>
@@ -839,9 +845,10 @@ const RolesManager: React.FC<RolesManagerProps> = ({ hubId, isActive }) => {
                     variant="contained"
                     disabled={isSubmitting}
                     sx={{
-                      background: '#FF69B4',
+                      background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
+                      color: '#fff',
                       '&:hover': {
-                        background: '#C71585'
+                        background: 'linear-gradient(90deg, #FF1493 0%, #00BFFF 100%)'
                       }
                     }}
                   >
@@ -860,7 +867,7 @@ const RolesManager: React.FC<RolesManagerProps> = ({ hubId, isActive }) => {
           setDeleteConfirmOpen(false);
           setRoleToDelete(null);
         }}
-        maxWidth="xl"
+        
         title="Удалить роль?"
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', py: 1 }}>

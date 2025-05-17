@@ -1,5 +1,5 @@
-import { api } from './api';
-import { User } from './users';
+import { api } from '@/api/api';
+import { User } from '@/api/users';
 
 export enum ChannelType {
   VOICE = 0,
@@ -25,10 +25,10 @@ export interface Message {
   id: number;
   content: string;
   author: User;
-  created_at: string;
-  attachments: string[];
-  last_modified_at?: string;
-  read_by_count?: number;
+  created_at: string; // ISO 8601 date string
+  attachments: string[]; // URLs to attachment files
+  last_modified_at?: string; // ISO 8601 date string if message was edited
+  read_by_count?: number; // Number of users who have read this message
 }
 
 export interface GetMessagesParams {
@@ -36,6 +36,12 @@ export interface GetMessagesParams {
   after?: number;
   around?: number;
   size?: number;
+}
+
+export interface CategoryWithChannels {
+  id: string | number;
+  name: string;
+  channels: Channel[];
 }
 
 export const channelsApi = api.injectEndpoints({
@@ -46,17 +52,26 @@ export const channelsApi = api.injectEndpoints({
         method: 'POST',
         body: {
           ...data,
-          category_id: data.categoryId
+          category_id: data.categoryId // Convert camelCase to snake_case for API
         }
       }),
       invalidatesTags: ['Channel']
     }),
-    updateChannel: builder.mutation<Channel, { channelId: number; data: Partial<Channel> & { category_id?: number } }>({
-      query: ({ channelId, data }) => ({
-        url: `/api/v1/channels/${channelId}`,
-        method: 'PUT',
-        body: data
-      }),
+    updateChannel: builder.mutation<Channel, { channelId: number; data: Partial<Channel> & { categoryId?: number } }>({
+      query: ({ channelId, data }) => {
+        // Convert categoryId to category_id for API if present
+        const apiData = { ...data };
+        if ('categoryId' in apiData) {
+          apiData.category_id = apiData.categoryId;
+          delete apiData.categoryId;
+        }
+        
+        return {
+          url: `/api/v1/channels/${channelId}`,
+          method: 'PUT',
+          body: apiData
+        };
+      },
       invalidatesTags: ['Channel']
     }),
     deleteChannel: builder.mutation<void, { channelId: number }>({
@@ -130,9 +145,3 @@ export const {
   useUpdateMessageMutation,
   useDeleteMessageMutation
 } = channelsApi;
-
-export type Category = {
-  id: string | number;
-  name: string;
-  channels: Channel[];
-}; 

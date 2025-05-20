@@ -36,3 +36,19 @@
     transform: rotate(360deg);
   }
 }
+
+/* Animation for message highlight pulsation */
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0px rgba(0, 207, 255, 0.4);
+    background-color: rgba(0, 207, 255, 0.3);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(0, 207, 255, 0);
+    background-color: rgba(0, 207, 255, 0.15);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(0, 207, 255, 0);
+    background-color: rgba(0, 207, 255, 0.3);
+  }
+}

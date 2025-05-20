@@ -73,7 +73,7 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
           </span>
         ) : '?'}
       </StyledUserAvatar>
-      {!!(userId && hubId && anchorPoint) && createPortal(
+      {userId && hubId && anchorPoint && createPortal(
         <UserProfileContainer
           userId={userId}
           hubId={hubId}
@@ -86,4 +86,4 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
   );
 };
 
-export default UserAvatar;
+export default UserAvatar; 

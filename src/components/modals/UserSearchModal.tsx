@@ -84,9 +84,8 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({ open, onClose, onStar
         {({ values, errors, touched, handleChange }) => (
           <Form>
             <Box sx={{ position: 'relative', mb: 2 }}>
-              <Field
-                name="query"
-                render={({ field }: any) => (
+              <Field name="query">
+                {({ field }: any) => (
                   <input
                     {...field}
                     placeholder="Введите имя пользователя..."
@@ -109,7 +108,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({ open, onClose, onStar
                     }}
                   />
                 )}
-              />
+              </Field>
               <SearchIcon sx={{ 
                 position: 'absolute',
                 left: '16px',

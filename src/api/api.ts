@@ -27,10 +27,14 @@ const API_BASE_URL = '/';
 
 export const baseQuery = fetchBaseQuery({
   baseUrl: API_BASE_URL,
-  prepareHeaders: (headers) => {
+  prepareHeaders: (headers, { getState, endpoint }) => {
     const token = getToken();
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
+    }
+    // Don't set Content-Type for FormData - let the browser set it with boundary
+    if (headers.get('Content-Type')?.includes('multipart/form-data')) {
+      headers.delete('Content-Type');
     }
     return headers;
   },

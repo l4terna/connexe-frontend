@@ -43,23 +43,19 @@ class WebSocketService {
         connectHeaders: {
           Authorization: `Bearer ${token}`
         },
-        debug: (str: string) => {
-          console.log(str);
-        },
+        debug: (str: string) => {},
         reconnectDelay: 5000,
         heartbeatIncoming: 15000,
         heartbeatOutgoing: 15000,
       });
 
       this.stompClient.onConnect = () => {
-        console.log('Connected to WebSocket');
         this.isConnecting = false;
         this.processPendingSubscriptions();
         resolve();
       };
 
       this.stompClient.onStompError = (frame) => {
-        console.error('STOMP error:', frame);
         this.isConnecting = false;
         this.connectionPromise = null;
         reject(frame);
@@ -113,13 +109,11 @@ class WebSocketService {
             }
           });
           this.subscriptions.set(topic, subscription);
-          console.log(`Subscribed to topic: ${topic}`);
         }
       } else {
         this.pendingSubscriptions.push({ topic, callback });
       }
     } catch (error) {
-      console.error('Failed to subscribe:', error);
       this.pendingSubscriptions.push({ topic, callback });
     }
   }
@@ -135,7 +129,6 @@ class WebSocketService {
         if (subscription) {
           subscription.unsubscribe();
           this.subscriptions.delete(topic);
-          console.log(`Unsubscribed from topic: ${topic}`);
         }
       }
     }
@@ -143,7 +136,6 @@ class WebSocketService {
 
   publish(destination: string, body: any) {
     if (!this.stompClient?.connected) {
-      console.error('WebSocket is not connected');
       return;
     }
 
@@ -153,7 +145,6 @@ class WebSocketService {
         body: JSON.stringify(body)
       });
     } catch (error) {
-      console.error('Failed to publish message:', error);
     }
   }
 
@@ -174,11 +165,8 @@ class WebSocketService {
         subscription.unsubscribe();
         this.subscriptions.delete(topic);
         this.subscribers.delete(topic);
-        console.log(`Unsubscribed from topic: ${topic}`);
       }
     });
-    
-    console.log(`Unsubscribed from all topics for channel ${channelId}`);
   }
 
   isConnected(): boolean {
@@ -190,7 +178,6 @@ class WebSocketService {
       // Unsubscribe from all topics
       this.subscriptions.forEach((subscription, topic) => {
         subscription.unsubscribe();
-        console.log(`Unsubscribed from topic: ${topic} during disconnect`);
       });
       this.subscriptions.clear();
       this.subscribers.clear();

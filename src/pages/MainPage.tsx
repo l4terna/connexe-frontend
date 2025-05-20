@@ -1,41 +1,50 @@
 import React, { useState } from 'react';
-import { Box, Typography, Avatar, IconButton, Dialog, DialogContent, Button, Paper, Tooltip, FormControl, InputLabel, Select, MenuItem, TextField } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import { useNavigate } from 'react-router-dom';
+import { Box, Typography, IconButton,  Tooltip} from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import SearchModal from '../components/SearchModal';
-import CloseIcon from '@mui/icons-material/Close';
-import { Hub, useCreateHubMutation, useGetHubsQuery } from '../api/hubs';
-import AppModal from '../components/AppModal';
-import { Formik, Form } from 'formik';
-import Input from '../components/common/Input';
-import * as Yup from 'yup';
+import { useCreateHubMutation, useGetHubsQuery } from '../api/hubs';
 import { useAppSelector } from '../hooks/redux';
 import { useGetCurrentUserQuery } from '../api/users';
 import { useDispatch } from 'react-redux';
 import { setUser } from '../store/userSlice';
 
-const sidebarGradient = 'linear-gradient(135deg, #1E1E2F 60%, #1E1E2F 100%)';
 const accentGradient = 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)';
 const mainBg = '#181824';
 
-const createHubSchema = Yup.object().shape({
-  name: Yup.string()
-    .max(30, 'Не более 30 символов')
-    .required('Обязательное поле'),
-  type: Yup.string().required('Обязательное поле'),
-});
+// Приветственные сообщения
+const greetings = [
+  'Вау',
+  'Ayo',
+  'Yo-yo',
+  'Хай',
+  'Хаюшки',
+  'Вот это встреча',
+  'Легенда вернулась',
+  'Воу-воу',
+  'Вижу тебя',
+  'Вот это да',
+  'Залетай',
+  'Шалом',
+  'Приветик',
+  'Опа',
+  'Ну здарова',
+  'Хэллоу',
+  'Бесконечного свэга',
+];
+
+const getRandomGreeting = () => {
+  return greetings[Math.floor(Math.random() * greetings.length)];
+};
 
 const MainPage: React.FC = () => {
-  const navigate = useNavigate();
   const dispatch = useDispatch();
   const currentUser = useAppSelector(state => state.user.currentUser);
   const { data: currentUserData, isLoading: isLoadingUser } = useGetCurrentUserQuery(undefined, {
     skip: !!currentUser // Skip if we already have user data
   });
   
-  const [createHubOpen, setCreateHubOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [greeting] = useState(() => getRandomGreeting()); // Set greeting once on mount
   const { refetch: refetchHubs } = useGetHubsQuery({});
   const [createHub] = useCreateHubMutation();
   
@@ -81,7 +90,7 @@ const MainPage: React.FC = () => {
             letterSpacing: 1,
           }}
         >
-          Welcome, {displayUser?.login || 'User'}!
+          {greeting}, {displayUser?.login || 'User'}!
         </Typography>
         <Box sx={{ flex: 1 }} />
         {/* Search only */}
@@ -112,12 +121,12 @@ const MainPage: React.FC = () => {
           }}
         >
           <Typography variant="h4" sx={{ color: '#fff', fontWeight: 700, mb: 2 }}>
-            🎉 Добро пожаловать!
+            🔥 Вау, ты тут!
           </Typography>
           <Typography variant="body1" sx={{ color: '#B0B0B0' }}>
-            Это ваша уникальная главная страница.<br />
-            Здесь будет чат, лента или любой другой контент.<br />
-            Дизайн вдохновлён Discord, но с вашим фирменным стилем!
+            Это твой личный уголок в цифровом пространстве!<br />
+            Чатики, мемасики и всякие фишки ждут тебя.<br />
+            Залетай в хабы, вайбуй с друзьями и будь на чиле! 😎
           </Typography>
         </Box>
       </Box>

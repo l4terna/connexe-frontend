@@ -29,6 +29,7 @@ export interface Message {
   attachments: string[]; // URLs to attachment files
   last_modified_at?: string; // ISO 8601 date string if message was edited
   read_by_count?: number; // Number of users who have read this message
+  reply?: Message; // Message that this message is replying to (API uses 'reply' field)
 }
 
 export interface GetMessagesParams {
@@ -36,6 +37,7 @@ export interface GetMessagesParams {
   after?: number;
   around?: number;
   size?: number;
+  search?: string; // Параметр для поиска сообщений
 }
 
 export interface CategoryWithChannels {
@@ -88,6 +90,10 @@ export const channelsApi = api.injectEndpoints({
       }),
       keepUnusedDataFor: 0,
       serializeQueryArgs: ({ queryArgs }) => {
+        // Если это поиск, не сериализуем только по channelId, чтобы иметь разные кэши для разных поисковых запросов
+        if (queryArgs.params?.search) {
+          return `${queryArgs.channelId}_search_${queryArgs.params.search}`;
+        }
         return queryArgs.channelId;
       },
       merge: (currentCache, newItems) => {
@@ -97,17 +103,46 @@ export const channelsApi = api.injectEndpoints({
         return currentArg !== previousArg;
       }
     }),
-    createMessage: builder.mutation<Message, { channelId: number; content: string; attachments?: File[] }>({
-      query: ({ channelId, content, attachments = [] }) => {
+    searchMessages: builder.query<Message[], { channelId: number; search: string; size?: number }>({
+      query: ({ channelId, search, size = 20 }) => ({
+        url: `/api/v1/channels/${channelId}/messages`,
+        params: { search, size }
+      }),
+      keepUnusedDataFor: 60, // Кэшировать результаты поиска 1 минуту
+    }),
+    createMessage: builder.mutation<Message, { channelId: number; content: string; attachments?: File[]; replyId?: number }>({
+      query: ({ channelId, content, attachments = [], replyId }) => {
+        console.log('createMessage called with params:', {
+          channelId,
+          content,
+          replyId,
+          replyIdType: typeof replyId,
+          hasAttachments: attachments.length > 0
+        });
+        
         const formData = new FormData();
         formData.append('content', content);
+        
+        // Ensure replyId is properly added to FormData
+        if (replyId !== undefined && replyId !== null) {
+          console.log('Adding replyId to FormData:', replyId);
+          formData.append('replyId', replyId.toString());
+        } else {
+          console.log('replyId is not provided:', { replyId, isUndefined: replyId === undefined, isNull: replyId === null });
+        }
+        
         attachments.forEach(file => formData.append('attachments', file));
+
+        // Log all FormData entries for debugging
+        console.log('Final FormData entries:');
+        for (let [key, value] of formData.entries()) {
+          console.log(`  ${key}: ${value}`);
+        }
 
         return {
           url: `/api/v1/channels/${channelId}/messages`,
           method: 'POST',
-          body: formData,
-          formData: true
+          body: formData
         };
       },
       invalidatesTags: ['Channel']
@@ -120,16 +155,16 @@ export const channelsApi = api.injectEndpoints({
         return {
           url: `/api/v1/channels/${channelId}/messages/${messageId}`,
           method: 'PUT',
-          body: formData,
-          formData: true
+          body: formData
         };
       },
       invalidatesTags: ['Channel']
     }),
-    deleteMessage: builder.mutation<void, { channelId: number; messageId: number }>({
-      query: ({ channelId, messageId }) => ({
+    deleteMessage: builder.mutation<void, { channelId: number; messageId: number; forEveryone?: boolean }>({
+      query: ({ channelId, messageId, forEveryone }) => ({
         url: `/api/v1/channels/${channelId}/messages/${messageId}`,
-        method: 'DELETE'
+        method: 'DELETE',
+        params: forEveryone ? { for_everyone: true } : undefined
       }),
       invalidatesTags: ['Channel']
     }),
@@ -141,6 +176,7 @@ export const {
   useUpdateChannelMutation,
   useDeleteChannelMutation,
   useGetMessagesQuery,
+  useSearchMessagesQuery,
   useCreateMessageMutation,
   useUpdateMessageMutation,
   useDeleteMessageMutation

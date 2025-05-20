@@ -104,9 +104,8 @@ const HubSearchModal: React.FC<HubSearchModalProps> = ({ open, onClose, onCreate
           {({ values, errors, touched, handleChange }) => (
             <Form>
               <Box sx={{ position: 'relative', mb: 2 }}>
-                <Field
-                  name="query"
-                  render={({ field }: any) => (
+                <Field name="query">
+                  {({ field }: any) => (
                     <input
                       {...field}
                       placeholder="Введите название хаба..."
@@ -129,7 +128,7 @@ const HubSearchModal: React.FC<HubSearchModalProps> = ({ open, onClose, onCreate
                       }}
                     />
                   )}
-                />
+                </Field>
                 <SearchIcon sx={{ 
                   position: 'absolute',
                   left: '16px',

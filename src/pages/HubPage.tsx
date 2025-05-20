@@ -46,7 +46,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import ChannelList from '../components/hub/channels/ChannelList';
-import MainChatAreaWrapper from '../components/hub/chat/MainChatAreaWrapper';
+import MainChatArea from '../components/hub/chat/MainChatArea';
 import MembersSidebar from '../components/hub/members/MembersSidebar';
 import { useHubContext } from '../context/HubContext';
 import { Formik, Form } from 'formik';
@@ -334,7 +334,7 @@ const HubPage: React.FC = () => {
   const [activeChannel, setActiveChannel] = useState<ChannelInterface | null>(null);
   const currentUser = useAppSelector(state => state.user.currentUser);
   const [isLoading, setIsLoading] = useState(false);
-  const [previousHubId, setPreviousHubId] = useState<string | null>(null);
+  const previousHubIdRef = useRef<string | null>(null);
   const [userPermissions, setUserPermissions] = useState<string[]>([]);
   const [userPermissionKeys, setUserPermissionKeys] = useState<PermissionKey[]>([]);
   const [hubMembers, setHubMembers] = useState<HubMember[]>([]);
@@ -390,15 +390,29 @@ const HubPage: React.FC = () => {
 
   // Handle hub change
   useEffect(() => {
-    if (hubId !== previousHubId) {
+    if (hubId !== previousHubIdRef.current) {
       setActiveChannel(null);
-      setPreviousHubId(hubId || null);
+      previousHubIdRef.current = hubId || null;
       // Always refetch when hub changes to ensure we have the latest data
       if (hubId) {
         refetchHubs();
       }
     }
-  }, [hubId, previousHubId, refetchHubs]);
+  }, [hubId, refetchHubs]);
+  
+  // Handle channel selection from URL parameter
+  useEffect(() => {
+    if (channelId && categories.length > 0) {
+      // Find the channel in the categories
+      const channel = categories
+        .flatMap(category => category.channels)
+        .find(ch => ch.id === Number(channelId));
+      
+      if (channel) {
+        setActiveChannel(channel);
+      }
+    }
+  }, [channelId, categories]);
 
   React.useEffect(() => {
     setUpdateHubData(updateHubData);
@@ -951,11 +965,6 @@ const HubPage: React.FC = () => {
           </Typography>
           <Box sx={{ flex: 1 }} />
           <Stack direction="row" spacing={1}>
-            <Tooltip title="Search">
-              <IconButton sx={{ color: theme.palette.secondary.main }} onClick={() => setSearchOpen(true)}>
-                <SearchIcon />
-              </IconButton>
-            </Tooltip>
             <Tooltip title="Notifications">
               <IconButton sx={{ color: theme.palette.primary.main }}>
                 <NotificationsIcon />
@@ -1099,8 +1108,10 @@ const HubPage: React.FC = () => {
           
           {/* Main Chat Area */}
           {activeChannel && currentUser ? (
-            <MainChatAreaWrapper
+            <MainChatArea 
               activeChannel={activeChannel}
+              user={currentUser}
+              hubId={currentHub?.id || parseInt(hubId || '0', 10)}
               userPermissions={userPermissions}
               isOwner={membershipData?.is_owner || false}
             />

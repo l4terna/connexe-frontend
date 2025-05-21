@@ -88,19 +88,35 @@ export const channelsApi = api.injectEndpoints({
         url: `/api/v1/channels/${channelId}/messages`,
         params
       }),
+      // Don't keep unused data in cache, to ensure fresh data on each fetch
       keepUnusedDataFor: 0,
-      serializeQueryArgs: ({ queryArgs }) => {
+      serializeQueryArgs: ({ queryArgs }) => {        
         // Если это поиск, не сериализуем только по channelId, чтобы иметь разные кэши для разных поисковых запросов
         if (queryArgs.params?.search) {
           return `${queryArgs.channelId}_search_${queryArgs.params.search}`;
         }
-        return queryArgs.channelId;
+        // Include the around parameter in the cache key for message navigation
+        if (queryArgs.params?.around) {
+          return `${queryArgs.channelId}_around_${queryArgs.params.around}`;
+        }
+        // Include the before parameter in the cache key to ensure different pages are cached separately
+        if (queryArgs.params?.before) {
+          return `${queryArgs.channelId}_before_${queryArgs.params.before}`;
+        }
+        // Basic channel ID for initial load - without timestamp to avoid constant refetching
+        return `${queryArgs.channelId}_initial`;
       },
       merge: (currentCache, newItems) => {
         return newItems;
       },
       forceRefetch({ currentArg, previousArg }) {
-        return currentArg !== previousArg;
+        // Always refetch if the channel ID changes
+        if (currentArg?.channelId !== previousArg?.channelId) {
+          return true;
+        }
+        // Also refetch if other parameters change
+        const shouldRefetch = JSON.stringify(currentArg) !== JSON.stringify(previousArg);
+        return shouldRefetch;
       }
     }),
     searchMessages: builder.query<Message[], { channelId: number; search: string; size?: number }>({
@@ -112,33 +128,16 @@ export const channelsApi = api.injectEndpoints({
     }),
     createMessage: builder.mutation<Message, { channelId: number; content: string; attachments?: File[]; replyId?: number }>({
       query: ({ channelId, content, attachments = [], replyId }) => {
-        console.log('createMessage called with params:', {
-          channelId,
-          content,
-          replyId,
-          replyIdType: typeof replyId,
-          hasAttachments: attachments.length > 0
-        });
-        
         const formData = new FormData();
         formData.append('content', content);
         
         // Ensure replyId is properly added to FormData
         if (replyId !== undefined && replyId !== null) {
-          console.log('Adding replyId to FormData:', replyId);
           formData.append('replyId', replyId.toString());
-        } else {
-          console.log('replyId is not provided:', { replyId, isUndefined: replyId === undefined, isNull: replyId === null });
-        }
+        } 
         
         attachments.forEach(file => formData.append('attachments', file));
-
-        // Log all FormData entries for debugging
-        console.log('Final FormData entries:');
-        for (let [key, value] of formData.entries()) {
-          console.log(`  ${key}: ${value}`);
-        }
-
+        
         return {
           url: `/api/v1/channels/${channelId}/messages`,
           method: 'POST',

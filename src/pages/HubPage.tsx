@@ -373,7 +373,6 @@ const HubPage: React.FC = () => {
     try {
       await refetchHubs();
     } catch (error) {
-      console.error('Error updating hub data:', error);
       if (window.notify) {
         window.notify('Failed to refresh hub data. Please try again.', 'error');
       }
@@ -409,7 +408,8 @@ const HubPage: React.FC = () => {
         .find(ch => ch.id === Number(channelId));
       
       if (channel) {
-        setActiveChannel(channel);
+        // Force a new channel object reference to ensure React detects the change
+        setActiveChannel({...channel});
       }
     }
   }, [channelId, categories]);
@@ -523,7 +523,6 @@ const HubPage: React.FC = () => {
     const categoryId = createChannelCategoryId || activeCategoryId;
     
     if (!channelName.trim() || !categoryId || !currentHub?.id) {
-      console.error('Missing required data:', { channelName: channelName.trim(), categoryId, currentHubId: currentHub?.id });
       window.notify && window.notify('Не удалось создать канал. Проверьте, что выбрана категория.', 'error');
       return;
     }
@@ -577,7 +576,6 @@ const HubPage: React.FC = () => {
         isUpdatingRef.current = false;
       }
     } catch (error) {
-      console.error('Error processing update:', error);
       updateQueueRef.current = [];
       isUpdatingRef.current = false;
     }
@@ -799,7 +797,6 @@ const HubPage: React.FC = () => {
   };
 
   const handleAddChannel = (categoryId: number | string) => {
-    console.log('handleAddChannel called with categoryId:', categoryId);
     setCreateChannelCategoryId(categoryId);
     setCreateChannelOpen(true);
   };
@@ -1108,13 +1105,15 @@ const HubPage: React.FC = () => {
           
           {/* Main Chat Area */}
           {activeChannel && currentUser ? (
-            <MainChatArea 
-              activeChannel={activeChannel}
-              user={currentUser}
-              hubId={currentHub?.id || parseInt(hubId || '0', 10)}
-              userPermissions={userPermissions}
-              isOwner={membershipData?.is_owner || false}
-            />
+            <React.Fragment key={`channel-${activeChannel.id}`}>
+              <MainChatArea 
+                activeChannel={activeChannel}
+                user={currentUser}
+                hubId={currentHub?.id || parseInt(hubId || '0', 10)}
+                userPermissions={userPermissions}
+                isOwner={membershipData?.is_owner || false}
+              />
+            </React.Fragment>
           ) : (
             <Box
               sx={{
@@ -1604,7 +1603,6 @@ const HubPage: React.FC = () => {
           }}
           validationSchema={channelValidationSchema}
           onSubmit={async (values, { resetForm }) => {
-            console.log('Form submitted with:', { values, createChannelCategoryId });
             await handleCreateChannel(values.name, values.type);
             resetForm();
             setCreateChannelOpen(false);

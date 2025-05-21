@@ -163,7 +163,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     } : { channelId: 0, params: {} },
     { 
       skip: !activeChannel || activeChannel.type !== ChannelType.TEXT,
-      refetchOnMountOrArgChange: true // Add this to force refresh on channel change
+      refetchOnMountOrArgChange: true // Force refresh on channel change
     }
   );
   
@@ -1788,7 +1788,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                 
                                 // Add to highlighted set for visual effect
                                 setHighlightedMessages(prev => {
-                                  const newSet = new Set();
+                                  const newSet = new Set<number>();
                                   newSet.add(msg.reply!.id);
                                   return newSet;
                                 });
@@ -2307,7 +2307,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                 msg.author.login.toLowerCase().includes(e.target.value.toLowerCase().trim())
                               ).length > 0;
                               
-                              setShowSearchResults(hasResults);
+                              setShowSearchResults(hasResults ? true : false);
                             }}
                             onFocus={() => {
                               // Show results when focusing if we already have results
@@ -2696,7 +2696,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                         
                         // Add to highlighted set for visual effect
                         setHighlightedMessages(prev => {
-                          const newSet = new Set();
+                          const newSet = new Set<number>();
                           newSet.add(replyingToMessage.id);
                           return newSet;
                         });

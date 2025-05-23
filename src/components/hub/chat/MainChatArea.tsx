@@ -169,6 +169,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Добавляем timestamp для принудительного обновления кеша после around загрузки
   const [cacheKey, setCacheKey] = useState(0);
   
+  // Определяем, является ли это начальной загрузкой
+  const isInitialLoad = !beforeId && !afterId && messages.length === 0;
+  
   const queryParams = activeChannel?.type === ChannelType.TEXT && !skipMainQuery ? {
     channelId: activeChannel?.id ?? 0,
     params: {
@@ -180,14 +183,22 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   } : { channelId: 0, params: {} };
   
   // Логируем параметры запроса
-  if (queryParams.channelId !== 0 && (beforeId || afterId)) {
-    console.log('Messages query params:', queryParams);
+  if (queryParams.channelId !== 0) {
+    console.log('Messages query params:', {
+      ...queryParams,
+      isInitialLoad,
+      beforeId,
+      afterId,
+      loadingMode,
+      skipMainQuery,
+      messagesLength: messages.length
+    });
   }
   
   const { data: messagesData = [], isLoading, isFetching, refetch: refetchMessages } = useGetMessagesQuery(
     queryParams,
     { 
-      skip: !activeChannel || activeChannel.type !== ChannelType.TEXT || skipMainQuery,
+      skip: !activeChannel || activeChannel.type !== ChannelType.TEXT || skipMainQuery || (loadingMode === 'pagination') || (!isInitialLoad && !beforeId && !afterId),
       refetchOnMountOrArgChange: true,
       // Отключаем кеширование для этого запроса
       keepUnusedDataFor: 0,

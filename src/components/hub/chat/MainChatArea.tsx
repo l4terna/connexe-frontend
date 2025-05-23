@@ -1110,11 +1110,23 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       const firstMessageId = messagesData[0]?.id;
       console.log("First message ID in response:", firstMessageId, "afterId:", afterId);
       
-      if (firstMessageId && firstMessageId <= afterId) {
-        console.error("CACHE ERROR: Received messages with ID <= afterId!");
-        console.error("Expected messages with ID > ", afterId, "but got first message with ID", firstMessageId);
+      // Проверяем, что мы получили хотя бы одно новое сообщение
+      // Если первое сообщение имеет ID = afterId, проверяем, есть ли другие сообщения
+      if (firstMessageId && firstMessageId < afterId) {
+        console.error("CACHE ERROR: Received messages with ID < afterId!");
+        console.error("Expected messages with ID >= ", afterId, "but got first message with ID", firstMessageId);
         
         // Сбрасываем состояния, чтобы избежать зацикливания
+        setAfterId(null);
+        isLoadingMoreRef.current = false;
+        setLoadingMode(null);
+        return;
+      }
+      
+      // Если первое сообщение = afterId и это единственное сообщение, значит новых сообщений нет
+      if (messagesData.length === 1 && firstMessageId === afterId) {
+        console.log("No new messages after", afterId);
+        setHasMoreMessagesAfter(false);
         setAfterId(null);
         isLoadingMoreRef.current = false;
         setLoadingMode(null);
@@ -1129,8 +1141,20 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         setHasMoreMessagesAfter(false);
       }
       
-      // Create extended messages
-      const newExtendedMessages = messagesData.map(convertToExtendedMessage);
+      // Create extended messages and filter out the boundary message if it exists
+      const newExtendedMessages = messagesData
+        .filter(msg => msg.id !== afterId) // Исключаем граничное сообщение
+        .map(convertToExtendedMessage);
+      
+      // Если после фильтрации не осталось сообщений, значит новых нет
+      if (newExtendedMessages.length === 0) {
+        console.log("No new messages after filtering boundary message");
+        setHasMoreMessagesAfter(false);
+        setAfterId(null);
+        isLoadingMoreRef.current = false;
+        setLoadingMode(null);
+        return;
+      }
       
       // Add new messages to the end
       setMessages(prev => {

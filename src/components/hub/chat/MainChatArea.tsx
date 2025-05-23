@@ -1016,14 +1016,22 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Handle pagination loading
   useEffect(() => {
     if (messagesData && messagesData.length > 0 && beforeId !== null && afterId === null && loadingMode === 'pagination') {
-      console.log("/nas", messagesData, beforeId);
-      console.log("First msg ID in response:", messagesData[0]?.id);
-      console.log("Should be messages before ID:", beforeId);
+      console.log("Loading messages before:", beforeId);
+      console.log("Received messages:", messagesData.map(m => ({ id: m.id, content: m.content.substring(0, 50) })));
       
       // Проверяем, что данные действительно соответствуют запросу
-      const firstMessageId = messagesData[0]?.id;
-      if (firstMessageId && firstMessageId >= beforeId) {
+      // Для before запроса все сообщения должны иметь ID < beforeId
+      const lastMessageId = messagesData[messagesData.length - 1]?.id;
+      console.log("Last message ID in response:", lastMessageId, "beforeId:", beforeId);
+      
+      if (lastMessageId && lastMessageId >= beforeId) {
         console.error("CACHE ERROR: Received messages with ID >= beforeId!");
+        console.error("Expected messages with ID < ", beforeId, "but got last message with ID", lastMessageId);
+        
+        // Сбрасываем состояния, чтобы избежать зацикливания
+        setBeforeId(null);
+        isLoadingMoreRef.current = false;
+        setLoadingMode(null);
         return;
       }
       

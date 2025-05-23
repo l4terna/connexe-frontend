@@ -1015,7 +1015,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Handle pagination loading
   useEffect(() => {
-    if (messagesData && messagesData.length > 0 && beforeId !== null && loadingMode === 'pagination') {
+    if (messagesData && messagesData.length > 0 && beforeId !== null && afterId === null && loadingMode === 'pagination') {
       console.log("/nas", messagesData, beforeId);
       console.log("First msg ID in response:", messagesData[0]?.id);
       console.log("Should be messages before ID:", beforeId);
@@ -1090,18 +1090,26 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         });
       });
     }
-  }, [messagesData, beforeId, convertToExtendedMessage, loadingMode]);
+  }, [messagesData, beforeId, afterId, convertToExtendedMessage, loadingMode]);
 
   // Handle pagination loading for afterId
   useEffect(() => {
-    if (messagesData && messagesData.length > 0 && afterId !== null && loadingMode === 'pagination') {
+    if (messagesData && messagesData.length > 0 && afterId !== null && beforeId === null && loadingMode === 'pagination') {
       console.log("Loading messages after:", afterId);
-      console.log("Received messages:", messagesData);
+      console.log("Received messages:", messagesData.map(m => ({ id: m.id, content: m.content.substring(0, 50) })));
       
       // Проверяем, что данные действительно соответствуют запросу
       const firstMessageId = messagesData[0]?.id;
+      console.log("First message ID in response:", firstMessageId, "afterId:", afterId);
+      
       if (firstMessageId && firstMessageId <= afterId) {
         console.error("CACHE ERROR: Received messages with ID <= afterId!");
+        console.error("Expected messages with ID > ", afterId, "but got first message with ID", firstMessageId);
+        
+        // Сбрасываем состояния, чтобы избежать зацикливания
+        setAfterId(null);
+        isLoadingMoreRef.current = false;
+        setLoadingMode(null);
         return;
       }
       
@@ -1149,7 +1157,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Clear afterId to prevent duplicate requests
       setAfterId(null);
     }
-  }, [messagesData, afterId, convertToExtendedMessage, loadingMode]);
+  }, [messagesData, afterId, beforeId, convertToExtendedMessage, loadingMode]);
 
   // Добавляем эффект для debounce поискового запроса
   useEffect(() => {

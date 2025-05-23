@@ -1088,8 +1088,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       console.log("Received messages:", messagesData);
       
       // Проверяем, что данные действительно соответствуют запросу
-      const lastMessageId = messagesData[messagesData.length - 1]?.id;
-      if (lastMessageId && lastMessageId <= afterId) {
+      const firstMessageId = messagesData[0]?.id;
+      if (firstMessageId && firstMessageId <= afterId) {
         console.error("CACHE ERROR: Received messages with ID <= afterId!");
         return;
       }

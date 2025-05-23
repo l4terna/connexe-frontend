@@ -108,7 +108,9 @@ export const channelsApi = api.injectEndpoints({
         }
         // Include the after parameter in the cache key for gap filling
         if (queryArgs.params?.after) {
-          return `${queryArgs.channelId}_after_${queryArgs.params.after}`;
+          // Добавляем _t параметр для обхода кеша после around загрузки
+          const timestamp = queryArgs.params._t || '';
+          return `${queryArgs.channelId}_after_${queryArgs.params.after}_${timestamp}`;
         }
         // Basic channel ID for initial load - without timestamp to avoid constant refetching
         return `${queryArgs.channelId}_initial`;

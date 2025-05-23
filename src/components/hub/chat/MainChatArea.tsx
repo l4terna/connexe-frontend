@@ -108,7 +108,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const [currentDateLabel, setCurrentDateLabel] = useState<string | null>(null);
   const [showDateLabel, setShowDateLabel] = useState(false);
   const [beforeId, setBeforeId] = useState<number | null>(null);
+  const [afterId, setAfterId] = useState<number | null>(null);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [hasMoreMessagesAfter, setHasMoreMessagesAfter] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [tempMessages, setTempMessages] = useState<Map<string, ExtendedMessage>>(new Map());
   const [unreadMessages, setUnreadMessages] = useState<Set<number>>(new Set());
@@ -172,12 +174,13 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     params: {
       size: MESSAGES_PER_PAGE,
       ...(beforeId ? { before: beforeId } : {}),
+      ...(afterId ? { after: afterId } : {}),
       _t: cacheKey // Добавляем уникальный ключ для обхода кеша
     }
   } : { channelId: 0, params: {} };
   
   // Логируем параметры запроса
-  if (queryParams.channelId !== 0 && beforeId) {
+  if (queryParams.channelId !== 0 && (beforeId || afterId)) {
     console.log('Messages query params:', queryParams);
   }
   
@@ -280,7 +283,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Reset all states when channel changes
     setMessages([]);
     setHasMoreMessages(true);
+    setHasMoreMessagesAfter(false);
     setBeforeId(null);
+    setAfterId(null);
     setEditingMessageId(null);
     setCurrentDateLabel(null);
     setShowDateLabel(false);
@@ -440,8 +445,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setMessages(newExtendedMessages);
       messagesLengthRef.current = newExtendedMessages.length;
       
-      // Сбрасываем beforeId чтобы не было конфликтов с кешем
+      // Сбрасываем beforeId и afterId чтобы не было конфликтов с кешем
       setBeforeId(null);
+      setAfterId(null);
+      
+      // Устанавливаем флаг, что есть сообщения после загруженных (для пагинации вниз)
+      setHasMoreMessagesAfter(true);
       
       // Обновляем cacheKey для принудительного обновления кеша
       setCacheKey(Date.now());
@@ -534,6 +543,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             setDisableAutoScroll(false);
             isLoadingMoreRef.current = false; // Разблокируем пагинацию
             setSkipMainQuery(false); // Разблокируем основной запрос
+            setIsJumpingToMessage(false); // Сбрасываем флаг перехода
           }, 1500); // Увеличиваем задержку для завершения всех анимаций
         }, 200);
       } else {
@@ -905,6 +915,24 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         }
       }
       
+      // Проверяем скролл вниз для загрузки следующих сообщений (после around)
+      const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (scrollBottom < container.scrollHeight / 4 && !isPaginationBlocked && hasMoreMessagesAfter && messages.length > 0 && loadingMode != 'around') {
+        // Only load more if we have messages
+        if (messages.length > 0) {
+          console.log('Loading more messages after due to scroll position');
+          isLoadingMoreRef.current = true;
+          setLoadingMode('pagination');
+          
+          // Get the ID of the newest message in the current view
+          const newestMessage = messages[messages.length - 1]; // Последнее сообщение в отсортированном массиве
+          if (newestMessage) {
+            console.log('Setting afterId to:', newestMessage.id, 'for newest message:', newestMessage);
+            setAfterId(newestMessage.id);
+          }
+        }
+      }
+      
       // Check for unread messages in the viewport to highlight them and find date label
       const visibleElements = container.querySelectorAll('.message-item');
       if (!visibleElements.length) return;
@@ -972,7 +1000,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }
     };
     // Updated dependencies for new loading mode system
-  }, [messages, hasMoreMessages, loadingMode]);
+  }, [messages, hasMoreMessages, hasMoreMessagesAfter, loadingMode]);
 
   // Handle pagination loading
   useEffect(() => {
@@ -1052,6 +1080,65 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       });
     }
   }, [messagesData, beforeId, convertToExtendedMessage, loadingMode]);
+
+  // Handle pagination loading for afterId
+  useEffect(() => {
+    if (messagesData && messagesData.length > 0 && afterId !== null && loadingMode === 'pagination') {
+      console.log("Loading messages after:", afterId);
+      console.log("Received messages:", messagesData);
+      
+      // Проверяем, что данные действительно соответствуют запросу
+      const lastMessageId = messagesData[messagesData.length - 1]?.id;
+      if (lastMessageId && lastMessageId <= afterId) {
+        console.error("CACHE ERROR: Received messages with ID <= afterId!");
+        return;
+      }
+      
+      const container = messagesContainerRef.current;
+      if (!container) return;
+      
+      // Check if we received less messages than requested
+      if (messagesData.length < MESSAGES_PER_PAGE) {
+        setHasMoreMessagesAfter(false);
+      }
+      
+      // Create extended messages
+      const newExtendedMessages = messagesData.map(convertToExtendedMessage);
+      
+      // Add new messages to the end
+      setMessages(prev => {
+        // Create a map for efficient duplicate removal
+        const messagesMap = new Map<number, ExtendedMessage>();
+        
+        // First add existing messages
+        prev.forEach(msg => {
+          if (typeof msg.id === 'number' && msg.id > 0) {
+            messagesMap.set(msg.id, msg);
+          }
+        });
+        
+        // Then add new messages, replacing any duplicates
+        newExtendedMessages.forEach(msg => {
+          if (typeof msg.id === 'number' && msg.id > 0) {
+            messagesMap.set(msg.id, msg);
+          }
+        });
+        
+        // Convert map back to array and sort by creation date
+        const mergedMessages = Array.from(messagesMap.values())
+          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        
+        return mergedMessages;
+      });
+      
+      // Reset loading state
+      isLoadingMoreRef.current = false;
+      setLoadingMode(null);
+      
+      // Clear afterId to prevent duplicate requests
+      setAfterId(null);
+    }
+  }, [messagesData, afterId, convertToExtendedMessage, loadingMode]);
 
   // Добавляем эффект для debounce поискового запроса
   useEffect(() => {
@@ -2621,8 +2708,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                       setDisableAutoScroll(true);
                       isLoadingMoreRef.current = true; // Блокируем пагинацию
                       
-                      // Очищаем beforeId чтобы не было конфликтов
+                      // Очищаем beforeId и afterId чтобы не было конфликтов
                       setBeforeId(null);
+                      setAfterId(null);
                       
                       // Устанавливаем целевое сообщение для перехода
                       setTargetMessageId(msg.id);

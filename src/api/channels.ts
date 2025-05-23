@@ -103,6 +103,10 @@ export const channelsApi = api.injectEndpoints({
         if (queryArgs.params?.before) {
           return `${queryArgs.channelId}_before_${queryArgs.params.before}`;
         }
+        // Include the after parameter in the cache key for gap filling
+        if (queryArgs.params?.after) {
+          return `${queryArgs.channelId}_after_${queryArgs.params.after}`;
+        }
         // Basic channel ID for initial load - without timestamp to avoid constant refetching
         return `${queryArgs.channelId}_initial`;
       },
@@ -112,6 +116,10 @@ export const channelsApi = api.injectEndpoints({
       forceRefetch({ currentArg, previousArg }) {
         // Always refetch if the channel ID changes
         if (currentArg?.channelId !== previousArg?.channelId) {
+          return true;
+        }
+        // Force refetch for after queries to prevent stale data
+        if (currentArg?.params?.after || previousArg?.params?.after) {
           return true;
         }
         // Also refetch if other parameters change
@@ -175,6 +183,7 @@ export const {
   useUpdateChannelMutation,
   useDeleteChannelMutation,
   useGetMessagesQuery,
+  useLazyGetMessagesQuery,
   useSearchMessagesQuery,
   useCreateMessageMutation,
   useUpdateMessageMutation,

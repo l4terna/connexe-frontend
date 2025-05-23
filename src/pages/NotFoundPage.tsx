@@ -2,32 +2,18 @@ import React from 'react';
 import { Box, Typography, Button, Paper } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import Sidebar from '../components/Sidebar';
-import { useGetHubsQuery } from '../api/hubs';
-import { useAppSelector } from '@/hooks/redux';
 
 const NotFoundPage: React.FC = () => {
   const navigate = useNavigate();
-  const { data: hubs = [] } = useGetHubsQuery({});
-  const currentUser = useAppSelector(state => state.user.currentUser);
 
   return (
     <Box sx={{ 
-      display: 'flex',
       height: '100vh', 
       background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
       position: 'relative',
     }}>
-      {/* Sidebar */}
-      <Sidebar
-        user={currentUser || { id: 0, login: '', avatar: null }}
-        hubs={hubs}
-        onAdd={() => {}}
-        selectedHubId={null}
-      />
-
       {/* Main Content */}
-      <Box sx={{ flex: 1, position: 'relative' }}>
+      <Box sx={{ position: 'relative' }}>
         <Box
           sx={{
             display: 'flex',

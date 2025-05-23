@@ -38,6 +38,7 @@ export interface GetMessagesParams {
   around?: number;
   size?: number;
   search?: string; // Параметр для поиска сообщений
+  _t?: number; // Timestamp для обхода кеша
 }
 
 export interface CategoryWithChannels {
@@ -90,7 +91,7 @@ export const channelsApi = api.injectEndpoints({
       }),
       // Don't keep unused data in cache, to ensure fresh data on each fetch
       keepUnusedDataFor: 0,
-      serializeQueryArgs: ({ queryArgs }) => {        
+      serializeQueryArgs: ({ queryArgs }) => {  
         // Если это поиск, не сериализуем только по channelId, чтобы иметь разные кэши для разных поисковых запросов
         if (queryArgs.params?.search) {
           return `${queryArgs.channelId}_search_${queryArgs.params.search}`;
@@ -101,7 +102,9 @@ export const channelsApi = api.injectEndpoints({
         }
         // Include the before parameter in the cache key to ensure different pages are cached separately
         if (queryArgs.params?.before) {
-          return `${queryArgs.channelId}_before_${queryArgs.params.before}`;
+          // Добавляем _t параметр для обхода кеша после around загрузки
+          const timestamp = queryArgs.params._t || '';
+          return `${queryArgs.channelId}_before_${queryArgs.params.before}_${timestamp}`;
         }
         // Include the after parameter in the cache key for gap filling
         if (queryArgs.params?.after) {
@@ -110,7 +113,7 @@ export const channelsApi = api.injectEndpoints({
         // Basic channel ID for initial load - without timestamp to avoid constant refetching
         return `${queryArgs.channelId}_initial`;
       },
-      merge: (currentCache, newItems) => {
+      merge: (_currentCache, newItems) => {
         return newItems;
       },
       forceRefetch({ currentArg, previousArg }) {
@@ -122,10 +125,16 @@ export const channelsApi = api.injectEndpoints({
         if (currentArg?.params?.after || previousArg?.params?.after) {
           return true;
         }
+
+        if (currentArg?.params?.before || previousArg?.params?.before) {
+          return true;
+        }
+
         // Also refetch if other parameters change
         const shouldRefetch = JSON.stringify(currentArg) !== JSON.stringify(previousArg);
         return shouldRefetch;
-      }
+      }, 
+  
     }),
     searchMessages: builder.query<Message[], { channelId: number; search: string; size?: number }>({
       query: ({ channelId, search, size = 20 }) => ({

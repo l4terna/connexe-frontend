@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Box, IconButton, Paper, Stack, Typography, Fade, Skeleton, Tooltip, Button, Checkbox } from '@mui/material';
+import { Box, IconButton, Paper, Stack, Typography, Fade, Skeleton, Tooltip, Button, Checkbox, FormControlLabel } from '@mui/material';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SendIcon from '@mui/icons-material/Send';
@@ -12,7 +12,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import SearchIcon from '@mui/icons-material/Search';
 import { Formik, Form, Field } from 'formik';
 import * as Yup from 'yup';
-import { Channel, Message, ChannelType, useGetMessagesQuery, useLazyGetMessagesQuery, useSearchMessagesQuery, useCreateMessageMutation, useUpdateMessageMutation, useDeleteMessageMutation } from '../../../api/channels';
+import { Channel, Message, ChannelType, useGetMessagesQuery, useSearchMessagesQuery, useCreateMessageMutation, useUpdateMessageMutation, useDeleteMessageMutation } from '../../../api/channels';
 import UserAvatar from '../../UserAvatar';
 import Input from '../../common/Input';
 import DOMPurify from 'dompurify';
@@ -87,6 +87,17 @@ const messageSchema = Yup.object().shape({
     .max(2000, 'Message is too long')
 });
 
+// Add type definitions for WebSocket messages
+interface StompMessage {
+  body: string;
+  headers: Record<string, string>;
+}
+
+interface StompFrame {
+  command: string;
+  headers: Record<string, string>;
+  body: string;
+}
 
 const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId, userPermissions, isOwner }) => {
   const [sending, setSending] = useState(false);
@@ -123,8 +134,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const [messageToDelete, setMessageToDelete] = useState<number | null>(null);
   const [deleteForEveryone, setDeleteForEveryone] = useState(false);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastTriggeredMiddleMessageIdRef = useRef<number | null>(null);
-  const loadMoreDebounceRef = useRef<NodeJS.Timeout | null>(null);
   
   // Поисковые состояния
   const [searchMode, setSearchMode] = useState(false);
@@ -138,40 +147,63 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Состояние для управления автопрокруткой
   const [disableAutoScroll, setDisableAutoScroll] = useState(false);
   
-  // Состояние для навигации к конкретному сообщению
+  // Состояние для целевого сообщения при переходе из поиска
+  const [targetMessageId, setTargetMessageId] = useState<number | null>(null);
   const [aroundMessageId, setAroundMessageId] = useState<number | null>(null);
-  const [aroundMessagesContext, setAroundMessagesContext] = useState<number[]>([]);
-  const [isNavigatingToMessage, setIsNavigatingToMessage] = useState(false);
-  const [lastNavigatedMessageId, setLastNavigatedMessageId] = useState<number | null>(null);
-  const [blockInitialLoad, setBlockInitialLoad] = useState(false);
-
-  // Состояния для заполнения пробелов в пагинации
-  const [afterId, setAfterId] = useState<number | null>(null);
-  const [isFillingGapDown, setIsFillingGapDown] = useState(false);
-  const [isFillingGapUp, setIsFillingGapUp] = useState(false);
-  const [gapBoundaries, setGapBoundaries] = useState<{
-    lower: number | null;
-    upper: number | null;
-  }>({ lower: null, upper: null });
-  const [isGapFillingActive, setIsGapFillingActive] = useState(false);
   
-  const MESSAGES_PER_PAGE = 60;
+  // Состояние для отслеживания режима загрузки
+  const [loadingMode, setLoadingMode] = useState<'initial' | 'pagination' | 'around' | null>('initial');
+  
+  // Флаг для блокировки всех запросов во время перехода
+  const [isJumpingToMessage, setIsJumpingToMessage] = useState(false);
+  
+  // Надежный контроль основного запроса
+  const [skipMainQuery, setSkipMainQuery] = useState(false);
+  
+  const MESSAGES_PER_PAGE = 40;
   
   // Декларации функций объявлены заранее для React useCallback
 
-  const { data: messagesData = [], isLoading } = useGetMessagesQuery(
-    activeChannel?.type === ChannelType.TEXT ? {
+  // Добавляем timestamp для принудительного обновления кеша после around загрузки
+  const [cacheKey, setCacheKey] = useState(0);
+  
+  const queryParams = activeChannel?.type === ChannelType.TEXT && !skipMainQuery ? {
+    channelId: activeChannel?.id ?? 0,
+    params: {
+      size: MESSAGES_PER_PAGE,
+      ...(beforeId ? { before: beforeId } : {}),
+      _t: cacheKey // Добавляем уникальный ключ для обхода кеша
+    }
+  } : { channelId: 0, params: {} };
+  
+  // Логируем параметры запроса
+  if (queryParams.channelId !== 0 && beforeId) {
+    console.log('Messages query params:', queryParams);
+  }
+  
+  const { data: messagesData = [], isLoading, isFetching, refetch: refetchMessages } = useGetMessagesQuery(
+    queryParams,
+    { 
+      skip: !activeChannel || activeChannel.type !== ChannelType.TEXT || skipMainQuery,
+      refetchOnMountOrArgChange: true,
+      // Отключаем кеширование для этого запроса
+      keepUnusedDataFor: 0,
+      // Форсируем новый запрос при изменении
+      refetchOnReconnect: true
+    }
+  );
+  
+  // Отдельный хук для around запроса
+  const { data: aroundMessagesData, isLoading: isLoadingAround } = useGetMessagesQuery(
+    activeChannel?.type === ChannelType.TEXT && aroundMessageId && loadingMode === 'around' ? {
       channelId: activeChannel?.id ?? 0,
       params: {
         size: MESSAGES_PER_PAGE,
-        before: beforeId || undefined,
-        around: aroundMessageId || undefined
+        around: aroundMessageId
       }
     } : { channelId: 0, params: {} },
     { 
-      skip: !activeChannel || activeChannel.type !== ChannelType.TEXT || 
-            (!beforeId && !aroundMessageId && blockInitialLoad),
-      refetchOnMountOrArgChange: true // Force refresh on channel change
+      skip: !activeChannel || activeChannel.type !== ChannelType.TEXT || !aroundMessageId || loadingMode !== 'around'
     }
   );
   
@@ -185,9 +217,13 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       skip: !activeChannel || !debouncedSearchQuery || activeChannel.type !== ChannelType.TEXT
     }
   );
-
-  // Хук для загрузки сообщений с параметром "after" для заполнения пробелов
-  const [triggerAfterQuery, { data: afterMessagesData = [], isLoading: isAfterLoading }] = useLazyGetMessagesQuery();
+  
+  // Простой эффект для отображения результатов поиска
+  useEffect(() => {
+    if (searchResultsData.length > 0) {
+      console.log("Found", searchResultsData.length, "search results");
+    }
+  }, [searchResultsData]);
 
   const [createMessage] = useCreateMessageMutation();
   const [updateMessage] = useUpdateMessageMutation();
@@ -197,76 +233,17 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const canSendMessages = hasPermission(userPermissions, 'SEND_MESSAGES', isOwner);
   const canManageMessages = hasPermission(userPermissions, 'MANAGE_MESSAGES', isOwner);
 
-  // Функция для определения пробелов между загруженными сообщениями и around-контекстом
-  const detectGaps = useCallback((currentMessages: ExtendedMessage[], aroundContext: number[], targetMessageId: number) => {
-    console.log('🔍 Detecting gaps:', { currentMessages: currentMessages.length, aroundContext, targetMessageId });
-    
-    if (currentMessages.length === 0 || aroundContext.length === 0) {
-      console.log('❌ No gap detection needed - empty data');
-      return { hasGap: false, gapDirection: null, boundaries: { lower: null, upper: null } };
-    }
-
-    const currentIds = currentMessages.map(msg => msg.id).sort((a, b) => a - b);
-    const minCurrentId = Math.min(...currentIds);
-    const maxCurrentId = Math.max(...currentIds);
-    const minAroundId = Math.min(...aroundContext);
-    const maxAroundId = Math.max(...aroundContext);
-
-    console.log('📊 ID ranges:', { 
-      current: [minCurrentId, maxCurrentId], 
-      around: [minAroundId, maxAroundId],
-      target: targetMessageId 
-    });
-
-    // Определяем направление пробела
-    let gapDirection: 'up' | 'down' | null = null;
-    let boundaries = { lower: null as number | null, upper: null as number | null };
-
-    // Пробел сверху: around-контекст находится выше текущих сообщений
-    if (maxAroundId < minCurrentId) {
-      gapDirection = 'up';
-      boundaries = { lower: maxAroundId, upper: minCurrentId };
-      console.log('⬆️ Gap detected UP:', boundaries);
-    }
-    // Пробел снизу: around-контекст находится ниже текущих сообщений  
-    else if (minAroundId > maxCurrentId) {
-      gapDirection = 'down';
-      boundaries = { lower: maxCurrentId, upper: minAroundId };
-      console.log('⬇️ Gap detected DOWN:', boundaries);
-    }
-    // Пробел посередине: целевое сообщение не пересекается с текущими
-    else if (targetMessageId < minCurrentId || targetMessageId > maxCurrentId) {
-      if (targetMessageId < minCurrentId) {
-        gapDirection = 'up';
-        boundaries = { lower: maxAroundId, upper: minCurrentId };
-        console.log('⬆️ Gap detected in MIDDLE (up):', boundaries);
-      } else {
-        gapDirection = 'down';
-        boundaries = { lower: maxCurrentId, upper: minAroundId };
-        console.log('⬇️ Gap detected in MIDDLE (down):', boundaries);
-      }
-    }
-
-    const hasGap = gapDirection !== null;
-    console.log('✅ Gap detection result:', { hasGap, gapDirection, boundaries });
-    
-    return { hasGap, gapDirection, boundaries };
-  }, []);
-
-  // Функция для очистки состояний заполнения пробелов
-  const clearGapFillingState = useCallback(() => {
-    console.log('🧹 Clearing gap filling state');
-    setAfterId(null);
-    setIsFillingGapDown(false);
-    setIsFillingGapUp(false);
-    setGapBoundaries({ lower: null, upper: null });
-    setIsGapFillingActive(false);
-  }, []);
+  // Log permission status when chat loads
+  useEffect(() => {
+    console.log('MANAGE_MESSAGES permission:', canManageMessages ? 'Yes' : 'No');
+  }, [canManageMessages]);
 
   // Функция для отписки от WebSocket топиков канала
   const unsubscribeFromChannelTopics = useCallback((channel: Channel | null, userId: number | null, callback: (message: any) => void) => {
     if (!channel) return;
-        
+    
+    console.log(`Unsubscribing from all topics for channel ${channel.id}`);
+    
     // Отписка от персональной очереди пользователя
     if (userId) {
       const userQueueTopic = `/v1/user/${userId}/queue/channels/${channel.id}/messages`;
@@ -321,24 +298,21 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setDebouncedSearchQuery('');
     setSearchMode(false);
     
-    // Clear navigation state
-    setAroundMessageId(null);
-    setAroundMessagesContext([]);
-    console.log('Around messages context cleared');
-    setFocusedMessageId(null);
-    setHighlightedMessages(new Set());
-    
-    // Разблокируем автопрокрутку и навигацию при смене канала
-    setDisableAutoScroll(false);
-    setIsNavigatingToMessage(false);
-    setLastNavigatedMessageId(null);
-    setBlockInitialLoad(false);
-    
     // Clear unread state
     setUnreadMessages(new Set());
     setUnreadCount(0);
     setNewMessagesCount(0);
     setHasNewMessage(false);
+    
+    // Clear target message state
+    setTargetMessageId(null);
+    setAroundMessageId(null);
+    setLoadingMode('initial');
+    setIsJumpingToMessage(false);
+    
+    // Reset query control
+    setSkipMainQuery(false);
+    setCacheKey(0);
     
     // Mark all messages as read when entering a channel
     if (activeChannel) {
@@ -346,8 +320,73 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     }
   }, [activeChannel?.id]); // Using id instead of the full object
 
+  // Simple function to scroll to bottom without marking messages as read
   const scrollToBottom = useCallback((smooth: boolean = false) => {
-    return;
+    // Если включен флаг блокировки автопрокрутки, не прокручиваем
+    if (disableAutoScroll || isJumpingToMessage) {
+      console.log('Auto-scroll to bottom prevented by disableAutoScroll flag or isJumpingToMessage');
+      return;
+    }
+    
+    if (messagesContainerRef.current) {
+      if (smooth) {
+        messagesContainerRef.current.scrollTo({
+          top: messagesContainerRef.current.scrollHeight,
+          behavior: 'smooth'
+        });
+      } else {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      }
+      setShowScrollButton(false);
+    }
+  }, [disableAutoScroll, isJumpingToMessage]);
+  
+  // Function to scroll to a specific message and highlight it
+  const scrollToMessage = useCallback((messageId: number) => {
+    if (!messagesContainerRef.current) return;
+    
+    const messageElement = document.getElementById(`message-${messageId}`);
+    if (!messageElement) {
+      console.log(`Message element with ID message-${messageId} not found`);
+      return;
+    }
+    
+    // Блокируем автопрокрутку при переходе к сообщению
+    setDisableAutoScroll(true);
+    
+    // Вычисляем позицию для прокрутки (центрируем сообщение в контейнере)
+    const container = messagesContainerRef.current;
+    const messageRect = messageElement.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    
+    const messageTop = messageElement.offsetTop;
+    const messageHeight = messageElement.offsetHeight;
+    const containerHeight = container.clientHeight;
+    
+    // Центрируем сообщение в видимой области
+    const scrollTop = messageTop - (containerHeight / 2) + (messageHeight / 2);
+    
+    // Прокручиваем к сообщению
+    container.scrollTo({
+      top: Math.max(0, scrollTop),
+      behavior: 'smooth'
+    });
+    
+    // Подсвечиваем сообщение
+    messageElement.style.transition = 'background-color 0.3s ease-in-out';
+    messageElement.style.backgroundColor = 'rgba(0, 207, 255, 0.1)';
+    
+    // Убираем подсветку через 2 секунды
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    
+    highlightTimeoutRef.current = setTimeout(() => {
+      messageElement.style.backgroundColor = '';
+      highlightTimeoutRef.current = null;
+    }, 2000);
+    
+    console.log(`Scrolled to message ${messageId}`);
   }, []);
   
   // Функция перехода к сообщению удалена
@@ -387,120 +426,28 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     };
   }, []);
 
-  // Handle initial messages load
+  // Handle around messages
   useEffect(() => {
-    if (!activeChannel || activeChannel.type !== ChannelType.TEXT) return;
-    
-    if (aroundMessageId && !isLoading) {
-      // Сначала проверяем, есть ли сообщение уже на текущей странице
-      const currentMessageIds = messages.map(m => m.id);
-      const messageAlreadyExists = currentMessageIds.includes(aroundMessageId);
+    if (aroundMessagesData && aroundMessagesData.length > 0 && loadingMode === 'around') {
+      console.log('Around messages loaded:', aroundMessagesData.length);
       
-      if (messageAlreadyExists) {        
-        // Блокируем все автопрокрутки
-        setIsNavigatingToMessage(true);
-        setDisableAutoScroll(true);
-        
-        // Запоминаем ID сообщения, к которому перешли
-        setLastNavigatedMessageId(aroundMessageId);
-        
-        // Подсвечиваем сообщение
-        setHighlightedMessages(new Set([aroundMessageId]));
-        
-        // Убираем подсветку через 1.5 секунды, но НЕ разблокируем навигацию
-        if (highlightTimeoutRef.current) {
-          clearTimeout(highlightTimeoutRef.current);
-        }
-        highlightTimeoutRef.current = setTimeout(() => {
-          setHighlightedMessages(new Set());
-          setFocusedMessageId(null);
-          setAroundMessageId(null);
-          // НЕ разблокируем isNavigatingToMessage - пользователь должен сам начать скроллить
-          highlightTimeoutRef.current = null;
-        }, 1500);
-        
-        setTimeout(() => {
-          const messageElement = document.querySelector(`[data-msg-id="${aroundMessageId}"]`);
-          if (messageElement) {
-            messageElement.scrollIntoView({ 
-              behavior: 'smooth', 
-              block: 'center' 
-            });
-            console.log(`Scrolled to existing message ${aroundMessageId}`);
-          }
-        }, 100);
-        
-        return; // Выходим из функции, не делаем запрос around
-      }
+      // Блокируем пагинацию на время обработки
+      isLoadingMoreRef.current = true;
       
-      // Если сообщения нет на странице, делаем запрос around
-      // Получаем ID из новых данных с around
-      const newAroundIds = messagesData.map(m => m.id);
+      const newExtendedMessages = aroundMessagesData.map(convertToExtendedMessage);
       
-      // Проверяем, есть ли целевое сообщение в полученных данных
-      const hasTargetMessage = newAroundIds.includes(aroundMessageId);
+      // Устанавливаем новые сообщения
+      setMessages(newExtendedMessages);
+      messagesLengthRef.current = newExtendedMessages.length;
       
-      if (hasTargetMessage) {
-        // Проверяем, есть ли эти сообщения уже в текущих messages
-        const isNewContext = !newAroundIds.every(id => currentMessageIds.includes(id));
-        
-        if (isNewContext) {
-          console.log("Loading around context for message:", aroundMessageId);
-          console.log("New around messages:", newAroundIds);
-          setAroundMessagesContext(newAroundIds);
-          console.log('Around messages context updated:', newAroundIds);
-        }
-      }
-    }
-
-    // Set empty  messages array when data is empty
-    if (!messagesData || messagesData.length === 0) {
-      setMessages([]);
-      // Scroll to bottom even when no messages (но только если не навигируемся к сообщению)
-      if (!aroundMessageId) {
-        setTimeout(() => {
-          scrollToBottom(false); // Use instant scrolling for initial load
-        }, 50);
-      }
-      return;
-    }
-    
-    // Only set messages on initial load (when beforeId is null) or when navigating to specific message
-    if (beforeId === null || aroundMessageId !== null) {
-      const newExtendedMessages = messagesData.map(convertToExtendedMessage);
+      // Сбрасываем beforeId чтобы не было конфликтов с кешем
+      setBeforeId(null);
       
-      // For initial load, also use Map to handle any potential existing messages
-      // Create map for messages with ID as key
-      const messagesMap = new Map<number, ExtendedMessage>();
+      // Обновляем cacheKey для принудительного обновления кеша
+      setCacheKey(Date.now());
       
-      // First add any existing messages (though there shouldn't be any for initial load)
-      if (messages.length > 0) {
-        messages.forEach(msg => {
-          if (typeof msg.id === 'number' && msg.id > 0) {
-            messagesMap.set(msg.id, msg);
-          }
-        });
-      }
-      
-      // Then add new messages, replacing any duplicates
-      newExtendedMessages.forEach(msg => {
-        if (typeof msg.id === 'number' && msg.id > 0) {
-          messagesMap.set(msg.id, msg);
-        }
-      });
-      
-      // Convert map back to array and sort by creation date
-      const mergedMessages = Array.from(messagesMap.values())
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-      
-      setMessages(mergedMessages);
-      messagesLengthRef.current = mergedMessages.length;
-      
-      // Reset disableAutoScroll on initial channel load
-      setDisableAutoScroll(false);
-      
-      // Check for unread messages in initial load
-      const unreadMessages = mergedMessages.filter(
+      // Check for unread messages
+      const unreadMessages = newExtendedMessages.filter(
         msg => msg.status === MessageStatus.NEW && msg.author.id !== user.id
       );
       
@@ -509,60 +456,93 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         setUnreadCount(unreadMessages.length);
       }
       
-      // Scroll to bottom after loading initial messages with delay for DOM to settle
-      // Но только если мы не навигируемся к конкретному сообщению
-      if (!aroundMessageId) {
+      // Не прокручиваем здесь - ждем следующий эффект
+    }
+  }, [aroundMessagesData, loadingMode, convertToExtendedMessage, user.id]);
+
+  // Handle messages load based on loading mode (excluding around)
+  useEffect(() => {
+    if (!activeChannel || activeChannel.type !== ChannelType.TEXT) return;
+    
+    // Пропускаем обработку для around режима (он обрабатывается отдельно)
+    if (loadingMode === 'around') return;
+    
+    // Пропускаем обработку если данные еще загружаются
+    if (isLoading || isFetching) return;
+    
+    // Пропускаем если происходит переход к сообщению
+    if (isJumpingToMessage) return;
+    
+    // Set empty messages array when data is empty
+    if (!messagesData || messagesData.length === 0) {
+      setMessages([]);
+      // Scroll to bottom only for initial load
+      if (loadingMode === 'initial') {
         setTimeout(() => {
-          scrollToBottom(false); // Use instant scrolling for initial load
-        }, 150);
+          scrollToBottom(false);
+        }, 50);
+      }
+      return;
+    }
+    
+    // Обрабатываем сообщения в зависимости от режима загрузки
+    if (loadingMode === 'initial') {
+      const newExtendedMessages = messagesData.map(convertToExtendedMessage);
+      
+      // Просто устанавливаем новые сообщения
+      setMessages(newExtendedMessages);
+      messagesLengthRef.current = newExtendedMessages.length;
+      
+      // Check for unread messages
+      const unreadMessages = newExtendedMessages.filter(
+        msg => msg.status === MessageStatus.NEW && msg.author.id !== user.id
+      );
+      
+      if (unreadMessages.length > 0) {
+        setUnreadMessages(new Set(unreadMessages.map(msg => msg.id)));
+        setUnreadCount(unreadMessages.length);
+      }
+      
+      // Прокручиваем вниз только при начальной загрузке
+      setTimeout(() => {
+        scrollToBottom(false);
+        setLoadingMode(null); // Сбрасываем режим после обработки
+      }, 150);
+    }
+  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, loadingMode, isJumpingToMessage]);
+
+  // Effect to scroll to target message when loaded
+  useEffect(() => {
+    if (targetMessageId && messages.length > 0 && loadingMode === 'around' && !isLoadingAround) {
+      const targetExists = messages.some(msg => msg.id === targetMessageId);
+      
+      if (targetExists) {        
+        // Продолжаем блокировать пагинацию во время анимации
+        isLoadingMoreRef.current = true;
+        
+        // Даем время DOM обновиться
+        setTimeout(() => {
+          scrollToMessage(targetMessageId);
+          
+          // Сбрасываем состояния после прокрутки
+          setTargetMessageId(null);
+          setAroundMessageId(null);
+          setLoadingMode(null);
+          
+          // Разблокируем автопрокрутку и пагинацию через некоторое время
+          setTimeout(() => {
+            setDisableAutoScroll(false);
+            isLoadingMoreRef.current = false; // Разблокируем пагинацию
+            setSkipMainQuery(false); // Разблокируем основной запрос
+          }, 1500); // Увеличиваем задержку для завершения всех анимаций
+        }, 200);
+      } else {
+        console.warn('Target message not found in loaded messages');
       }
     }
-  }, [activeChannel, messagesData, beforeId, aroundMessageId, convertToExtendedMessage, user.id, scrollToBottom]);
+  }, [messages, targetMessageId, scrollToMessage, loadingMode, isLoadingAround]);
 
-  // Auto-scroll to bottom when changing channels (with or without messages)
-  useEffect(() => {
-    if (activeChannel && !beforeId && !aroundMessageId) {
-      // Give DOM time to render
-      const timeoutId = setTimeout(() => {
-        scrollToBottom(false); // Use instant scrolling when changing channels
-      }, 100);
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [activeChannel?.id, beforeId, aroundMessageId, scrollToBottom]);
-
-  // Effect to scroll to focused message when using "around" parameter
-  useEffect(() => {
-    if (aroundMessageId && focusedMessageId && messagesData.length > 0) {
-      // Блокируем все автопрокрутки во время навигации
-      setIsNavigatingToMessage(true);
-      setDisableAutoScroll(true);
-      
-      // Find the target message in the DOM and scroll to it
-      setTimeout(() => {
-        const messageElement = document.querySelector(`[data-msg-id="${focusedMessageId}"]`);
-        if (messageElement) {
-          messageElement.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'center' 
-          });
-          console.log(`Scrolled to message ${focusedMessageId}`);
-          
-          // Сбрасываем aroundMessageId через 1.5 секунды, но НЕ разблокируем навигацию
-          setTimeout(() => {
-            setAroundMessageId(null);
-            // НЕ разблокируем isNavigatingToMessage - пользователь должен сам начать скроллить
-          }, 1500);
-        }
-      }, 200); // Give DOM time to render
-    }
-  }, [aroundMessageId, focusedMessageId, messagesData]);
-
-  // Reset lastTriggeredMiddleMessageIdRef when aroundMessagesContext changes
-  useEffect(() => {
-    lastTriggeredMiddleMessageIdRef.current = null;
-    console.log('Reset lastTriggeredMiddleMessageIdRef due to aroundMessagesContext change');
-  }, [aroundMessagesContext]);
+  // Remove old auto-scroll effect - now handled in main message loading effect
 
   // Add effect to focus input when chat is opened
   useEffect(() => {
@@ -599,8 +579,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         setSearchMode(false);
         setHighlightedMessages(new Set());
         setFocusedMessageId(null);
-        // Разблокируем автопрокрутку при закрытии поиска
-        setDisableAutoScroll(false);
       }
     };
     
@@ -676,6 +654,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         return newMap;
       });
       
+      // Scroll to bottom immediately after adding the temporary message
+      setTimeout(() => {
+        scrollToBottom(true); // Use smooth scrolling when sending a message
+      }, 10);
       
       resetForm();
 
@@ -879,43 +861,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setDeleteForEveryone(false);
   }, [activeChannel, deleteMessage, messages, notify, messageToDelete, deleteForEveryone]);
 
-  // Функция для навигации к конкретному сообщению
-  const handleNavigateToMessage = useCallback((messageId: number) => {
-    // Блокируем все автопрокрутки во время навигации к сообщению
-    setIsNavigatingToMessage(true);
-    setDisableAutoScroll(true);
-    setBlockInitialLoad(true); // Блокируем initial load
-    
-    // Запоминаем ID сообщения, к которому перешли
-    setLastNavigatedMessageId(messageId);
-    
-    // Очищаем предыдущие состояния и устанавливаем aroundMessageId одновременно
-    // React 18 автоматически batch'ит эти вызовы, но для надежности делаем их подряд
-    React.startTransition(() => {
-      setBeforeId(null);
-      setAroundMessageId(messageId);
-    });
-    
-    // Устанавливаем фокус на сообщение
-    setFocusedMessageId(messageId);
-    
-    // Подсвечиваем сообщение
-    setHighlightedMessages(new Set([messageId]));
-    
-    // Убираем подсветку через 1.5 секунды, но НЕ разблокируем навигацию
-    if (highlightTimeoutRef.current) {
-      clearTimeout(highlightTimeoutRef.current);
-    }
-    highlightTimeoutRef.current = setTimeout(() => {
-      setHighlightedMessages(new Set());
-      setFocusedMessageId(null);
-      // НЕ разблокируем isNavigatingToMessage - пользователь должен сам начать скроллить
-      highlightTimeoutRef.current = null;
-    }, 1500);
-    
-    console.log(`Navigating to message ID: ${messageId}`);
-  }, []);
-
   // Handle scroll and date label display
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -932,26 +877,30 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Check if we should show scroll button
       setShowScrollButton(container.scrollTop + container.clientHeight < container.scrollHeight - 400);
       
+      // Блокируем пагинацию во время перехода к сообщению
+      if (isJumpingToMessage) {
+        return;
+      }
+      
       // Проверяем наличие флагов блокировки пагинации
-      const isPaginationBlocked = isLoadingMoreRef.current;
+      const isPaginationBlocked = isLoadingMoreRef.current || loadingMode !== null;
       
       // Загружаем больше сообщений только если не заблокирована пагинация
-      if (container.scrollTop < container.scrollHeight / 4 && !isPaginationBlocked && hasMoreMessages && messagesData.length > 0) {
-        // Only load more if the previous response had exactly MESSAGES_PER_PAGE messages
-        if (messagesData.length === MESSAGES_PER_PAGE) {
+      if (container.scrollTop < container.scrollHeight / 4 && !isPaginationBlocked && hasMoreMessages && messages.length > 0 && loadingMode != 'around') {
+        // Only load more if we have messages
+        if (messages.length >= MESSAGES_PER_PAGE) {
+          console.log('Loading more messages due to scroll position');
           isLoadingMoreRef.current = true;
+          setLoadingMode('pagination');
           
-          // (Jump tracking removed)
-          
-          // Enable disableAutoScroll when manually scrolling up to load more
-          setDisableAutoScroll(false);
           // Get the ID of the oldest message in the current view
-          const oldestMessage = messagesData[messagesData.length - 1];
+          const oldestMessage = messages[0]; // Первое сообщение в отсортированном массиве
           if (oldestMessage) {
-            // setBeforeId(oldestMessage.id);
+            console.log('Setting beforeId to:', oldestMessage.id, 'for oldest message:', oldestMessage);
+            setBeforeId(oldestMessage.id);
           }
         } else {
-          // If we got less than MESSAGES_PER_PAGE messages, we've reached the end
+          // If we have less messages than a full page, we've reached the beginning
           setHasMoreMessages(false);
         }
       }
@@ -1015,27 +964,34 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }
     };
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
+    container.addEventListener('scroll', handleScroll);
     return () => {
       container.removeEventListener('scroll', handleScroll);
       if (dateLabelTimeoutRef.current) {
         clearTimeout(dateLabelTimeoutRef.current);
       }
     };
-    // Removed messages from dependencies to avoid infinite loops
-  }, [messagesData, hasMoreMessages, activeChannel?.id]);
+    // Updated dependencies for new loading mode system
+  }, [messages, hasMoreMessages, loadingMode]);
 
-  // Handle loading more messages
+  // Handle pagination loading
   useEffect(() => {
-    if (messagesData && messagesData.length > 0 && beforeId !== null) {
+    if (messagesData && messagesData.length > 0 && beforeId !== null && loadingMode === 'pagination') {
+      console.log("/nas", messagesData, beforeId);
+      console.log("First msg ID in response:", messagesData[0]?.id);
+      console.log("Should be messages before ID:", beforeId);
+      
+      // Проверяем, что данные действительно соответствуют запросу
+      const firstMessageId = messagesData[0]?.id;
+      if (firstMessageId && firstMessageId >= beforeId) {
+        console.error("CACHE ERROR: Received messages with ID >= beforeId!");
+        return;
+      }
+      
       const container = messagesContainerRef.current;
       if (!container) return;
       
-      console.log('Processing additional loaded messages for beforeId:', beforeId);
-      console.log('Current messages count before pagination:', messages.length);
       
-      // (Search jump logic removed)
-  
       // Store the scroll height and scroll position BEFORE adding new messages
       const scrollHeightBefore = container.scrollHeight;
       const scrollPositionBefore = container.scrollTop;
@@ -1044,7 +1000,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       if (messagesData.length < MESSAGES_PER_PAGE) {
         setHasMoreMessages(false);
       }
-  
+
       // Temporarily set disableAutoScroll to prevent automatic scrolling to bottom
       setDisableAutoScroll(true);
       
@@ -1073,14 +1029,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         // Convert map back to array and sort by creation date
         const mergedMessages = Array.from(messagesMap.values())
           .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-        
-        console.log(`Pagination: Combined ${prev.length} existing and ${newExtendedMessages.length} new messages into ${mergedMessages.length} total`);
-        
+          
+
         return mergedMessages;
       });
-  
+
       // Use a more direct approach to maintain scroll position
-      // Wait for the DOM to update with the new messages (both frames are critical)
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           // Get the new scroll height after adding messages
@@ -1090,20 +1044,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           const heightAdded = scrollHeightAfter - scrollHeightBefore;
           
           // Adjust the scroll position by the exact amount of height added
-          // This keeps the same content visible as before
-          console.log('Adjusting scroll position:', {
-            before: scrollPositionBefore,
-            after: scrollPositionBefore + heightAdded,
-            heightAdded
-          });
-          
           container.scrollTop = scrollPositionBefore + heightAdded;
           
           isLoadingMoreRef.current = false;
+          setLoadingMode(null);
         });
       });
     }
-  }, [messagesData, beforeId, convertToExtendedMessage, messages.length]);
+  }, [messagesData, beforeId, convertToExtendedMessage, loadingMode]);
 
   // Добавляем эффект для debounce поискового запроса
   useEffect(() => {
@@ -1131,73 +1079,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }
     };
   }, [searchQuery]);
-
-  // Обработчик для сообщений, загруженных с параметром "after"
-  useEffect(() => {
-    if (afterMessagesData && afterMessagesData.length > 0) {      
-      // Временно блокируем автоскролл во время обработки after сообщений
-      setDisableAutoScroll(true);
-      console.log("swag", afterMessagesData, messages);
-      // Проверяем на дублирование с уже загруженными сообщениями  
-      const existingMessageIds = new Set(messages.map(msg => msg.id));
-      const newMessages = afterMessagesData.filter(msg => !existingMessageIds.has(msg.id));
-      const duplicateMessages = afterMessagesData.filter(msg => existingMessageIds.has(msg.id));
-
-      if (duplicateMessages.length > 0) {
-          // Не очищаем контекст полностью, а фильтруем только обработанные сообщения
-          const remainingContext = aroundMessagesContext.filter(
-              id => id > afterId
-          );
-          setAroundMessagesContext(remainingContext);
-          setAfterId(null);
-          setDisableAutoScroll(false);
-          return;
-      }
-      
-      if (newMessages.length > 0) {
-        const newExtendedMessages = newMessages.map(convertToExtendedMessage);
-        
-        // Обновляем сообщения
-        setMessages(currentMessages => {
-          // Создаем Map для эффективного объединения
-          const messagesMap = new Map<number, ExtendedMessage>();
-          
-          // Добавляем существующие сообщения
-          currentMessages.forEach(msg => {
-            if (typeof msg.id === 'number' && msg.id > 0) {
-              messagesMap.set(msg.id, msg);
-            }
-          });
-          
-          console.log('📥 Добавляем новые сообщения:', newExtendedMessages.map(m => m.id));
-          
-          // Добавляем новые сообщения
-          newExtendedMessages.forEach(msg => {
-            if (typeof msg.id === 'number' && msg.id > 0) {
-              messagesMap.set(msg.id, msg);
-            }
-          });
-          
-          // Преобразуем обратно в массив и сортируем
-          const result = Array.from(messagesMap.values()).sort((a, b) => 
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-          );
-          
-          console.log('✨ setMessages result: всего сообщений:', result.length);
-          return result;
-        });
-        
-        // Обновляем aroundMessagesContext - заменяем на новые ID полученных сообщений
-        const newMessageIds = newMessages.map(msg => msg.id);
-        setAroundMessagesContext(newMessageIds);
-      } else {
-        console.log('❌ Нет новых сообщений для добавления');
-      }
-      
-      setDisableAutoScroll(false);
-      setAfterId(null);
-    }
-  }, [afterMessagesData, convertToExtendedMessage]);
 
   // Sort messages for display in the chat
   const sortedMessages = useMemo(() => {
@@ -1227,27 +1108,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     let scrollTimeoutId: NodeJS.Timeout | null = null;
 
     const handleScroll = () => {
-      // Разблокируем навигацию когда пользователь начинает скроллить
-      if (isNavigatingToMessage) {
-        setIsNavigatingToMessage(false);
-      }
-      
-      // Проверяем, если пользователь ушел далеко от сообщения - сбрасываем lastNavigatedMessageId
-      if (lastNavigatedMessageId) {
-        const targetElement = document.querySelector(`[data-msg-id="${lastNavigatedMessageId}"]`);
-        if (targetElement) {
-          const container = messagesContainerRef.current!;
-          const targetRect = targetElement.getBoundingClientRect();
-          const containerRect = container.getBoundingClientRect();
-          
-          // Если сообщение не видно, сбрасываем lastNavigatedMessageId
-          const isVisible = targetRect.bottom > containerRect.top && targetRect.top < containerRect.bottom;
-          if (!isVisible) {
-            setLastNavigatedMessageId(null);
-          }
-        }
-      }
-      
       // Clear previous timeout if exists
       if (scrollTimeoutId) {
         clearTimeout(scrollTimeoutId);
@@ -1274,47 +1134,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         }
       }
       
-      // Проверяем пересечение viewport с сообщением на 25% от начала aroundMessagesContext при скролле вниз      
-      if (aroundMessagesContext.length > 0 && currentScrollTop > lastScrollTop) {
-        // Находим индекс на 25% от начала массива
-        const quarterIndex = Math.floor(aroundMessagesContext.length * 0.25);
-        const quarterAroundMessageId = aroundMessagesContext[quarterIndex];
-        const quarterAroundMessageElement = document.querySelector(`[data-msg-id="${quarterAroundMessageId}"]`);
-        
-        if (quarterAroundMessageElement) {
-          const containerRect = container.getBoundingClientRect();
-          const messageRect = quarterAroundMessageElement.getBoundingClientRect();
-          
-          // Проверяем, пересекается ли сообщение с viewport
-          const isIntersecting = messageRect.bottom > containerRect.top && messageRect.top < containerRect.bottom;
-          
-          if (isIntersecting && lastTriggeredMiddleMessageIdRef.current !== quarterAroundMessageId) {
-            // Отменяем предыдущий таймер если он существует
-            if (loadMoreDebounceRef.current) {
-              clearTimeout(loadMoreDebounceRef.current);
-            }
-            
-            // Устанавливаем новый таймер с дебаунсом
-            loadMoreDebounceRef.current = setTimeout(() => {
-              // Запоминаем ID, чтобы не триггерить повторно для того же сообщения
-              lastTriggeredMiddleMessageIdRef.current = quarterAroundMessageId;
-              
-              // Но передаем последний ID для загрузки сообщений после него
-              const lastAroundMessageId = aroundMessagesContext[aroundMessagesContext.length - 1];
-              console.log('🎯 25% message reached, triggering lazy query with after:', lastAroundMessageId);
-              triggerAfterQuery({
-                channelId: activeChannel?.id ?? 0,
-                params: {
-                  size: MESSAGES_PER_PAGE,
-                  after: lastAroundMessageId
-                }
-              });
-            }, 300); // 300ms дебаунс
-          }
-        }
-      }
-      
-      // Обновляем последнюю позицию скролла ПОСЛЕ проверки
+      // Обновляем последнюю позицию скролла
       lastScrollTop = currentScrollTop;
       
       // Устанавливаем состояние только если юзер не скроллит вверх или прошло достаточно времени
@@ -1322,6 +1142,20 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       if (!intentionalScrollUp || scrollTimeElapsed > 1000) {
         setIsScrolledToBottom(isAtBottom);
       }
+      
+      // Log scroll position for debugging
+      console.log('Scroll position:', {
+        isAtBottom,
+        intentionalScrollUp,
+        scrollTimeElapsed,
+        scrollPosition,
+        scrollHeight: container.scrollHeight,
+        scrollTop: currentScrollTop,
+        lastScrollTop,
+        clientHeight: container.clientHeight,
+        isUserScrolling,
+        disableAutoScroll
+      });
       
       // If scrolled to bottom, mark all messages as read and re-enable auto-scroll
       if (isAtBottom && activeChannel) {
@@ -1352,15 +1186,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }, 150);
     };
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-      // Очищаем таймер дебаунса при размонтировании
-      if (loadMoreDebounceRef.current) {
-        clearTimeout(loadMoreDebounceRef.current);
-      }
-    };
-  }, [activeChannel, isNavigatingToMessage, lastNavigatedMessageId, aroundMessagesContext]);
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [activeChannel]);
 
   const handleNewMessage = useCallback((data: { 
     type: 'MESSAGE_CREATE' | 'MESSAGE_UPDATE' | 'MESSAGE_DELETE' | 'MESSAGE_READ_STATUS';
@@ -1478,8 +1306,29 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
               }
             }, 100); // Small delay to ensure DOM is updated
           } else {
-            
+            // If at bottom or only scrolled up a little, auto-scroll to bottom and mark as read
             if (activeChannel) {
+              // Add to buffer for marking as read
+              unreadMessagesBufferRef.current.add(newMessage.id);
+              
+              // Auto-scroll to bottom only if not jumping to a message
+              if (loadingMode !== 'around' && !isJumpingToMessage) {
+                requestAnimationFrame(() => {
+                  if (container) {
+                    container.scrollTop = container.scrollHeight;
+                    
+                    // Find the message element after scrolling
+                    setTimeout(() => {
+                      const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
+                      if (messageElement) {
+                        // Ensure the message is visible in the viewport
+                        messageElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                      }
+                    }, 50);
+                  }
+                });
+              }
+              
               webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
               // Update all messages to READ status
               setMessages(prev => prev.map(msg => (
@@ -1572,7 +1421,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       console.log(`Обновлены счетчики прочтений для сообщений в диапазоне ${from}-${to}`);
     }
-  }, [isScrolledToBottom, user.id, activeChannel, convertToExtendedMessage]);
+  }, [isScrolledToBottom, user.id, activeChannel, convertToExtendedMessage, loadingMode, isJumpingToMessage]);
 
   // Subscribe to user-specific queue
   useWebSocket(
@@ -1700,7 +1549,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setIsScrolledToBottom(isAtBottom);
     };
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
+    container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
   }, []);
 
@@ -1716,7 +1565,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }
       
       // Отписываемся от всех подписок при размонтировании компонента
-      if (activeChannel && user) {        
+      if (activeChannel && user) {
+        console.log(`Component unmounting - unsubscribing from all topics for channel ${activeChannel.id}`);
+        
         // Используем функцию отписки от топиков
         unsubscribeFromChannelTopics(activeChannel, user.id, handleNewMessage);
       }
@@ -1739,21 +1590,18 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setShowSearchResults(false);
       
       // After exiting search, make sure UI is in a good state
-      // Но только если мы не находимся в режиме навигации к сообщению
-      if (!aroundMessageId && !focusedMessageId) {
-        setTimeout(() => {
-          // If we're near the bottom, scroll to bottom
-          if (messagesContainerRef.current) {
-            const { scrollHeight, scrollTop, clientHeight } = messagesContainerRef.current;
-            const scrollPosition = scrollHeight - scrollTop - clientHeight;
-            if (scrollPosition < 200) {
-              scrollToBottom(true);
-            }
+      setTimeout(() => {
+        // If we're near the bottom, scroll to bottom (but not if jumping to a message)
+        if (messagesContainerRef.current && loadingMode !== 'around' && !isJumpingToMessage) {
+          const { scrollHeight, scrollTop, clientHeight } = messagesContainerRef.current;
+          const scrollPosition = scrollHeight - scrollTop - clientHeight;
+          if (scrollPosition < 200) {
+            scrollToBottom(true);
           }
-        }, 100);
-      }
+        }
+      }, 100);
     }
-  }, [searchMode, aroundMessageId, focusedMessageId, scrollToBottom]);
+  }, [searchMode, scrollToBottom, loadingMode, isJumpingToMessage]);
   
   // Handle click outside to close search results dropdown
   useEffect(() => {
@@ -1974,6 +1822,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
               const messageElement = (
                 <Box
                   key={isTempMessage ? `temp-${msg.created_at}` : msg.id}
+                  id={`message-${msg.id}`}
                   className="message-item"
                   data-date={msg.created_at}
                   data-msg-id={msg.id.toString()}
@@ -2082,12 +1931,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                 
                                 // Add to highlighted set for visual effect
                                 setHighlightedMessages(prev => {
-                                  const newSet = new Set<number>();
+                                  const newSet = new Set();
                                   newSet.add(msg.reply!.id);
                                   return newSet;
                                 });
                                 
-                                // Remove highlight after 1.5 seconds
+                                // Remove highlight after 3 seconds
                                 highlightTimeoutRef.current = setTimeout(() => {
                                   setHighlightedMessages(prev => {
                                     const newSet = new Set(prev);
@@ -2096,19 +1945,19 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                   });
                                   setFocusedMessageId(null);
                                   highlightTimeoutRef.current = null;
-                                }, 1500);
+                                }, 3000);
                               }
                             }}
                           >
                             <ReplyIcon sx={{ color: '#00CFFF', fontSize: '0.85rem', mt: '2px' }} />
                             <Box sx={{ flex: 1, minWidth: 0 }}>
-                              <Typography sx={{ color: '#00CFFF', fontWeight: 600, fontSize: '0.85rem', mb: 0.25 }}>
+                              <Typography sx={{ color: '#00CFFF', fontWeight: 600, fontSize: '0.75rem', mb: 0.25 }}>
                                 {msg.reply.author.login}
                               </Typography>
                               <Typography 
                                 sx={{ 
                                   color: 'rgba(255,255,255,0.6)', 
-                                  fontSize: '1rem',
+                                  fontSize: '0.75rem',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   display: '-webkit-box',
@@ -2393,52 +2242,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             return result;
           })()}
           
-          {/* Loading indicator when fetching more messages after aroundMessagesContext */}
-          {isAfterLoading && aroundMessagesContext.length > 0 && (
-            <Box sx={{ 
-              display: 'flex', 
-              justifyContent: 'center', 
-              alignItems: 'center', 
-              py: 3,
-              gap: 2
-            }}>
-              <Box sx={{
-                display: 'flex',
-                gap: 1
-              }}>
-                {[0, 1, 2].map((i) => (
-                  <Box
-                    key={i}
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: 'rgba(0, 207, 255, 0.8)',
-                      animation: 'pulse 1.4s ease-in-out infinite',
-                      animationDelay: `${i * 0.16}s`,
-                      '@keyframes pulse': {
-                        '0%, 60%, 100%': {
-                          transform: 'scale(0.8)',
-                          opacity: 0.5
-                        },
-                        '30%': {
-                          transform: 'scale(1.1)',
-                          opacity: 1
-                        }
-                      }
-                    }}
-                  />
-                ))}
-              </Box>
-              <Typography sx={{ 
-                color: 'rgba(255,255,255,0.6)', 
-                fontSize: '0.9rem'
-              }}>
-                Загрузка сообщений...
-              </Typography>
-            </Box>
-          )}
-          
           {/* For properly tracking the end of messages for scrolling */}
           <div ref={messagesEndRef} />
         </>
@@ -2647,7 +2450,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                 msg.author.login.toLowerCase().includes(e.target.value.toLowerCase().trim())
                               ).length > 0;
                               
-                              setShowSearchResults(hasResults ? true : false);
+                              setShowSearchResults(hasResults);
                             }}
                             onFocus={() => {
                               // Show results when focusing if we already have results
@@ -2677,8 +2480,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                                   setSearchMode(false);
                                   setSearchQuery('');
                                   form.resetForm();
-                                  // Разблокируем автопрокрутку
-                                  setDisableAutoScroll(false);
                                 }
                               }
                             }}
@@ -2714,8 +2515,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                           setSearchMode(false);
                           setSearchQuery('');
                           setFieldValue('query', '');
-                          // Разблокируем автопрокрутку
-                          setDisableAutoScroll(false);
                         }
                       }}
                       sx={{ 
@@ -2803,12 +2602,38 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                   <Box
                     key={msg.id}
                     onClick={() => {
+                      // Устанавливаем режим загрузки around
+                      setLoadingMode('around');
+
+                      // Блокируем основной запрос
+                      setSkipMainQuery(true);
+                      
+                      // Блокируем все запросы
+                      setIsJumpingToMessage(true);
+                      
                       // Закрываем панель поиска
                       setShowSearchResults(false);
                       setSearchMode(false);
+                      setSearchQuery('');
+                      setDebouncedSearchQuery('');
                       
-                      // Навигация к сообщению
-                      handleNavigateToMessage(msg.id);
+                      // Блокируем автопрокрутку и пагинацию
+                      setDisableAutoScroll(true);
+                      isLoadingMoreRef.current = true; // Блокируем пагинацию
+                      
+                      // Очищаем beforeId чтобы не было конфликтов
+                      setBeforeId(null);
+                      
+                      // Устанавливаем целевое сообщение для перехода
+                      setTargetMessageId(msg.id);
+                      
+                      // Небольшая задержка перед установкой aroundMessageId
+                      setTimeout(() => {
+                        setAroundMessageId(msg.id);
+                        setIsJumpingToMessage(false); // Разблокируем запросы
+                      }, 100);
+                      
+                      console.log(`Jumping to message ID: ${msg.id} using around parameter`);
                     }}
                     sx={{
                       p: 1.5,
@@ -3042,12 +2867,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                         
                         // Add to highlighted set for visual effect
                         setHighlightedMessages(prev => {
-                          const newSet = new Set<number>();
+                          const newSet = new Set();
                           newSet.add(replyingToMessage.id);
                           return newSet;
                         });
                         
-                        // Remove highlight after 1.5 seconds
+                        // Remove highlight after 3 seconds
                         highlightTimeoutRef.current = setTimeout(() => {
                           setHighlightedMessages(prev => {
                             const newSet = new Set(prev);
@@ -3056,7 +2881,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                           });
                           setFocusedMessageId(null);
                           highlightTimeoutRef.current = null;
-                        }, 1500);
+                        }, 3000);
                       }
                     }
                   }}

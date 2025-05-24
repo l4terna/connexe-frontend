@@ -38,7 +38,6 @@ export interface GetMessagesParams {
   around?: number;
   size?: number;
   search?: string; // Параметр для поиска сообщений
-  _t?: number; // Timestamp для обхода кеша
 }
 
 export interface CategoryWithChannels {
@@ -63,7 +62,7 @@ export const channelsApi = api.injectEndpoints({
     updateChannel: builder.mutation<Channel, { channelId: number; data: Partial<Channel> & { categoryId?: number } }>({
       query: ({ channelId, data }) => {
         // Convert categoryId to category_id for API if present
-        const apiData = { ...data };
+        const apiData: any = { ...data };
         if ('categoryId' in apiData) {
           apiData.category_id = apiData.categoryId;
           delete apiData.categoryId;
@@ -89,7 +88,6 @@ export const channelsApi = api.injectEndpoints({
         url: `/api/v1/channels/${channelId}/messages`,
         params
       }),
-      // Don't keep unused data in cache, to ensure fresh data on each fetch
       keepUnusedDataFor: 0,
       serializeQueryArgs: ({ queryArgs }) => {  
         // Если это поиск, не сериализуем только по channelId, чтобы иметь разные кэши для разных поисковых запросов
@@ -102,15 +100,11 @@ export const channelsApi = api.injectEndpoints({
         }
         // Include the before parameter in the cache key to ensure different pages are cached separately
         if (queryArgs.params?.before) {
-          // Добавляем _t параметр для обхода кеша после around загрузки
-          const timestamp = queryArgs.params._t || '';
-          return `${queryArgs.channelId}_before_${queryArgs.params.before}_${timestamp}`;
+          return `${queryArgs.channelId}_before_${queryArgs.params.before}`;
         }
         // Include the after parameter in the cache key for gap filling
         if (queryArgs.params?.after) {
-          // Добавляем _t параметр для обхода кеша после around загрузки
-          const timestamp = queryArgs.params._t || '';
-          return `${queryArgs.channelId}_after_${queryArgs.params.after}_${timestamp}`;
+          return `${queryArgs.channelId}_after_${queryArgs.params.after}`;
         }
         // Basic channel ID for initial load - without timestamp to avoid constant refetching
         return `${queryArgs.channelId}_initial`;

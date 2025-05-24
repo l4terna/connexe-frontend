@@ -2565,90 +2565,89 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             if (currentGroup.length > 0) {
               result.push(...currentGroup);
             }
+            
+            // Add skeleton loader for downward pagination
+            if (loadingMode === 'pagination' && afterId) {
+              result.push(
+                <Box key="skeleton-after" sx={{ 
+                  width: '100%',
+                  minHeight: '400px',
+                  p: 2, 
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  background: 'rgba(30,30,47,0.5)',
+                  borderRadius: 2,
+                  mt: 2,
+                }}>
+                  {[...Array(5)].map((_, index) => (
+                    <Box key={`skeleton-after-${index}`} sx={{ 
+                      display: 'flex', 
+                      gap: 2, 
+                      alignItems: 'flex-start',
+                      minHeight: '80px',
+                      p: 1,
+                      flexShrink: 0
+                    }}>
+                      <Skeleton 
+                        variant="circular" 
+                        width={40} 
+                        height={40} 
+                        animation="wave"
+                        sx={{ 
+                          bgcolor: 'rgba(149,128,255,0.1)',
+                          flexShrink: 0,
+                          '&::after': {
+                            background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
+                          }
+                        }} 
+                      />
+                      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                        <Skeleton 
+                          variant="text" 
+                          width={120} 
+                          height={20} 
+                          animation="wave"
+                          sx={{ 
+                            bgcolor: 'rgba(149,128,255,0.1)',
+                            '&::after': {
+                              background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
+                            }
+                          }} 
+                        />
+                        <Skeleton 
+                          variant="text" 
+                          width="80%" 
+                          height={16} 
+                          animation="wave"
+                          sx={{ 
+                            bgcolor: 'rgba(149,128,255,0.1)',
+                            '&::after': {
+                              background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
+                            }
+                          }} 
+                        />
+                        <Skeleton 
+                          variant="text" 
+                          width="60%" 
+                          height={16} 
+                          animation="wave"
+                          sx={{ 
+                            bgcolor: 'rgba(149,128,255,0.1)',
+                            '&::after': {
+                              background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
+                            }
+                          }} 
+                        />
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              );
+            }
 
             return result;
           })()}
-          
-          {/* Skeleton loader for downward pagination */}
-          {loadingMode === 'pagination' && afterId && (
-            <Box sx={{ 
-              width: '100%',
-              height: 'auto',
-              maxHeight: '600px',
-              p: 2, 
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 1,
-              background: 'rgba(30,30,47,0.5)',
-              borderRadius: 2,
-              mt: 2,
-              overflowY: 'auto',
-              overflowX: 'hidden',
-            }}>
-              {[...Array(5)].map((_, index) => (
-                <Box key={`skeleton-after-${index}`} sx={{ 
-                  display: 'flex', 
-                  gap: 2, 
-                  alignItems: 'flex-start',
-                  minHeight: '80px',
-                  p: 1,
-                  flexShrink: 0
-                }}>
-                  <Skeleton 
-                    variant="circular" 
-                    width={40} 
-                    height={40} 
-                    animation="wave"
-                    sx={{ 
-                      bgcolor: 'rgba(149,128,255,0.1)',
-                      flexShrink: 0,
-                      '&::after': {
-                        background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                      }
-                    }} 
-                  />
-                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    <Skeleton 
-                      variant="text" 
-                      width={120} 
-                      height={20} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)',
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                    <Skeleton 
-                      variant="text" 
-                      width="80%" 
-                      height={16} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)',
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                    <Skeleton 
-                      variant="text" 
-                      width="60%" 
-                      height={16} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)',
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                  </Box>
-                </Box>
-              ))}
-            </Box>
-          )}
           
           {/* For properly tracking the end of messages for scrolling */}
           <div ref={messagesEndRef} />

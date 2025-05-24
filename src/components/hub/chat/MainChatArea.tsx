@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Box, IconButton, Paper, Stack, Typography, Fade, Skeleton, Tooltip, Button, Checkbox, FormControlLabel } from '@mui/material';
+import { Box, IconButton, Paper, Stack, Typography, Fade, Tooltip, Button, Checkbox, Skeleton } from '@mui/material';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SendIcon from '@mui/icons-material/Send';
@@ -21,6 +21,7 @@ import { hasPermission } from '@/utils/rolePermissions';
 import { useWebSocket } from '@/websocket/useWebSocket';
 import { webSocketService } from '@/websocket/WebSocketService';
 import AppModal from '../../AppModal';
+import ChatMessageItem from './ChatMessageItem';
 
 enum MessageStatus {
   SENT = 0,
@@ -180,9 +181,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   } : { channelId: 0, params: {} };
   
   // Логируем параметры запроса
-  if (queryParams.channelId !== 0 && (beforeId || afterId)) {
-    console.log('Messages query params:', queryParams);
-  }
+  console.log('Main query params:', {
+    channelId: queryParams.channelId,
+    beforeId,
+    afterId,
+    skipMainQuery,
+    loadingMode,
+    isLoadingMoreRef: isLoadingMoreRef.current
+  });
   
   const { data: messagesData = [], isLoading, isFetching, refetch: refetchMessages } = useGetMessagesQuery(
     queryParams,
@@ -403,35 +409,32 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Разрешаем автопрокрутку, так как пользователь явно запросил прокрутку вниз
     setDisableAutoScroll(false);
     
-    // Scroll to bottom first with smooth animation
-    scrollToBottom(true);
+    console.log('User clicked scroll to bottom button, loading latest messages...');
     
-    // Если включена пагинация после и есть сообщения, проверяем наличие новых
-    if (enableAfterPagination && hasMoreMessagesAfter && messages.length > 0) {
-      // Сортируем сообщения и берем последнее
-      const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-      const newestMessage = sortedMsgs[sortedMsgs.length - 1];
-      
-      if (newestMessage && lastAfterIdRef.current !== newestMessage.id) {
-        console.log('Checking for new messages after:', newestMessage.id);
-        isLoadingMoreRef.current = true;
-        setLoadingMode('pagination');
-        setAfterId(newestMessage.id);
-        lastAfterIdRef.current = newestMessage.id;
-        setBeforeId(null);
-        lastBeforeIdRef.current = null;
-      }
-    }
+    // Сбрасываем все параметры пагинации для загрузки самых новых сообщений
+    setBeforeId(null);
+    setAfterId(null);
+    lastBeforeIdRef.current = null;
+    lastAfterIdRef.current = null;
+    setEnableAfterPagination(false);
+    setHasMoreMessages(true);
+    setHasMoreMessagesAfter(true);
+    
+    // Устанавливаем режим загрузки как initial для получения последних сообщений
+    setLoadingMode('initial');
+    
+    // Очищаем временные сообщения
+    setTempMessages(new Map());
+    
+    // Блокируем пагинацию на время загрузки
+    isLoadingMoreRef.current = true;
+    
+    // Форсируем новый запрос без параметров пагинации (получим самые новые)
+    refetchMessages();
     
     // Send bulk-read-all request when scrolling to bottom
     if (activeChannel) {
       webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
-      // Update all messages to READ status
-      setMessages(prev => prev.map(msg => (
-        msg.author.id !== user.id 
-          ? { ...msg, status: MessageStatus.READ }
-          : msg
-      )));
     }
 
     // Update local state
@@ -439,7 +442,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setUnreadCount(0);
     setNewMessagesCount(0);
     setHasNewMessage(false);
-  }, [activeChannel, user.id, scrollToBottom, enableAfterPagination, hasMoreMessagesAfter, messages]);
+  }, [activeChannel, refetchMessages]);
 
   // Helper function to convert Message to ExtendedMessage
   const convertToExtendedMessage = useCallback((message: Message): ExtendedMessage => {
@@ -464,9 +467,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setMessages(newExtendedMessages);
       messagesLengthRef.current = newExtendedMessages.length;
       
-      // Сбрасываем beforeId и afterId чтобы не было конфликтов с кешем
-      setBeforeId(null);
-      setAfterId(null);
+      // НЕ сбрасываем beforeId и afterId после around загрузки
+      // Они будут установлены при скролле пользователя
+      // Но сбрасываем lastAfterIdRef чтобы пагинация могла работать
+      lastAfterIdRef.current = null;
+      lastBeforeIdRef.current = null;
       
       // Check for unread messages in the new set
       const unreadMessages = newExtendedMessages.filter(
@@ -481,11 +486,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Не прокручиваем здесь - ждем следующий эффект
       
-      // Если получили меньше сообщений чем запрашивали, включаем пагинацию вниз
-      // так как это означает что мы где-то в середине истории сообщений
-      if (newExtendedMessages.length < MESSAGES_PER_PAGE * 2) { // around запрашивает удвоенное количество
-        setEnableAfterPagination(true);
-      }
+      // При around запросе всегда включаем пагинацию вниз
+      // так как мы можем быть в середине истории сообщений
+      setEnableAfterPagination(true);
+      console.log('Around messages loaded, enabling after pagination');
       
       // При загрузке around всегда предполагаем, что есть больше сообщений в обоих направлениях
       // (если только не получили очень мало сообщений)
@@ -509,6 +513,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Пропускаем если происходит переход к сообщению
     if (isJumpingToMessage) return;
     
+    // Пропускаем обработку если у нас есть beforeId или afterId (это пагинация)
+    if (beforeId !== null || afterId !== null) return;
+    
     // Set empty messages array when data is empty
     if (!messagesData || messagesData.length === 0) {
       setMessages([]);
@@ -525,6 +532,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     if (loadingMode === 'initial') {
       const newExtendedMessages = messagesData.map(convertToExtendedMessage);
       
+      console.log('Initial load - received', messagesData.length, 'messages');
+      
       // Просто устанавливаем новые сообщения
       setMessages(newExtendedMessages);
       messagesLengthRef.current = newExtendedMessages.length;
@@ -533,8 +542,13 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // значит мы загрузили самые новые сообщения и больше нет
       if (messagesData.length < MESSAGES_PER_PAGE) {
         setHasMoreMessagesAfter(false);
-        // Не отключаем enableAfterPagination при начальной загрузке,
-        // так как пользователь еще не проверял наличие новых сообщений
+        setEnableAfterPagination(false);
+        console.log('Initial load - less than full page, no more messages after');
+      } else {
+        // Если получили полную страницу, есть вероятность что есть еще сообщения
+        // Но не включаем пагинацию вниз при начальной загрузке, так как мы в самом низу
+        setEnableAfterPagination(false);
+        console.log('Initial load - full page received, but pagination disabled as we are at the bottom');
       }
       
       // Check for unread messages
@@ -551,9 +565,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setTimeout(() => {
         scrollToBottom(false);
         setLoadingMode(null); // Сбрасываем режим после обработки
+        isLoadingMoreRef.current = false; // Разблокируем пагинацию
       }, 150);
     }
-  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, loadingMode, isJumpingToMessage]);
+  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, loadingMode, isJumpingToMessage, beforeId, afterId]);
 
   // Effect to scroll to target message when loaded
   useEffect(() => {
@@ -577,8 +592,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           setTimeout(() => {
             setDisableAutoScroll(false);
             isLoadingMoreRef.current = false; // Разблокируем пагинацию
-            // Теперь сбрасываем skipMainQuery чтобы пагинация могла работать
-            setSkipMainQuery(false);
+            // НЕ сбрасываем skipMainQuery здесь - он сбросится когда установится beforeId или afterId
           }, 1500); // Увеличиваем задержку для завершения всех анимаций
         }, 200);
       } else {
@@ -970,6 +984,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             // Очищаем afterId чтобы избежать конфликтов
             setAfterId(null);
             lastAfterIdRef.current = null;
+            // Сбрасываем skipMainQuery чтобы запрос мог отправиться
+            setSkipMainQuery(false);
           }
         } else {
           // If we have less messages than a full page, we've reached the beginning
@@ -978,9 +994,30 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }
       
       // Загружаем больше сообщений при скролле вниз (когда остается 20% до конца)
+      // Debug logging для after пагинации
+      if (scrollBottom < container.clientHeight * 0.5) { // Логируем когда остается 50% для отладки
+        console.log('Near bottom debug:', {
+          scrollBottom,
+          threshold: container.clientHeight * 0.2,
+          condition: scrollBottom < container.clientHeight * 0.2,
+          enableAfterPagination,
+          hasMoreMessagesAfter,
+          isPaginationBlocked,
+          messagesLength: messages.length
+        });
+      }
+      
       if (scrollBottom < container.clientHeight * 0.2 && !isPaginationBlocked && hasMoreMessagesAfter && enableAfterPagination && messages.length > 0) {
         // Only load more if we have messages
-        if (messages.length >= MESSAGES_PER_PAGE) {
+        console.log('Triggering after pagination:', {
+          messagesLength: messages.length,
+          hasMoreMessagesAfter,
+          enableAfterPagination,
+          isPaginationBlocked,
+          lastAfterId: lastAfterIdRef.current
+        });
+        
+        if (messages.length > 0) {
           console.log('Loading more messages due to scroll position (DOWN)');
           isLoadingMoreRef.current = true;
           setLoadingMode('pagination');
@@ -989,6 +1026,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           // Сортируем сообщения перед выбором ID
           const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
           const newestMessage = sortedMsgs[sortedMsgs.length - 1]; // Последнее сообщение в отсортированном массиве
+          
+          console.log('Newest message:', newestMessage?.id, 'Current afterId:', afterId);
+          
           if (newestMessage && lastAfterIdRef.current !== newestMessage.id) {
             console.log('Setting afterId to:', newestMessage.id, 'for newest message:', newestMessage);
             setAfterId(newestMessage.id);
@@ -996,10 +1036,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             // Очищаем beforeId чтобы избежать конфликтов
             setBeforeId(null);
             lastBeforeIdRef.current = null;
+            // Сбрасываем skipMainQuery чтобы запрос мог отправиться
+            setSkipMainQuery(false);
           }
-        } else {
-          // If we have less messages than a full page, we've reached the end
-          setHasMoreMessagesAfter(false);
         }
       }
       
@@ -1105,8 +1144,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Temporarily set disableAutoScroll to prevent automatic scrolling to bottom
       setDisableAutoScroll(true);
       
-      // Включаем пагинацию вниз, так как пользователь активно просматривает историю
-      setEnableAfterPagination(true);
+      // НЕ включаем пагинацию вниз при обычной загрузке истории
+      // Она должна включаться только после around запроса
       
       // Convert new messages to ExtendedMessage
       const newExtendedMessages = messagesData.map(convertToExtendedMessage);
@@ -1167,6 +1206,15 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Handle pagination loading for after (scroll down)
   useEffect(() => {
+    console.log('After pagination effect check:', {
+      hasMessagesData: !!messagesData,
+      messagesDataLength: messagesData?.length,
+      afterId,
+      beforeId,
+      loadingMode,
+      isLoading,
+      isFetching
+    });
     if (messagesData && messagesData.length > 0 && afterId !== null && beforeId === null && loadingMode === 'pagination' && !isLoading && !isFetching) {
       console.log("Loading after messages", messagesData, afterId);
       console.log("First msg ID in response:", messagesData[0]?.id);
@@ -1197,14 +1245,23 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }
       
       const container = messagesContainerRef.current;
-      if (!container) return;
+      if (!container) {
+        isLoadingMoreRef.current = false;
+        setLoadingMode(null);
+        return;
+      }
       
       // Check if we received less messages than requested
       if (dataToProcess.length < MESSAGES_PER_PAGE) {
         setHasMoreMessagesAfter(false);
-        // Отключаем пагинацию вниз только когда точно знаем что больше нет сообщений
+        // Если получили меньше сообщений чем запрашивали, значит достигли конца
+        // и можно отключить пагинацию вниз
         setEnableAfterPagination(false);
-        console.log('No more messages after, disabling after pagination');
+        console.log('No more messages after, received only', dataToProcess.length, 'messages, disabling after pagination');
+      } else {
+        // Получили полную страницу, значит есть еще сообщения
+        console.log('Received full page of', dataToProcess.length, 'messages, more messages might be available');
+        // hasMoreMessagesAfter должен оставаться true
       }
 
       // Temporarily set disableAutoScroll to prevent automatic scrolling to bottom
@@ -1242,8 +1299,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // For scroll down pagination, we don't need to adjust scroll position
       // Messages are added at the bottom, so scroll position naturally stays the same
       requestAnimationFrame(() => {
+        console.log('Resetting isLoadingMoreRef after after pagination');
         isLoadingMoreRef.current = false;
         setLoadingMode(null);
+        // Don't reset afterId here - it will cause a duplicate request
+        // afterId should only be reset when changing channels or scrolling to bottom
       });
     }
   }, [messagesData, afterId, convertToExtendedMessage, loadingMode, isLoading, isFetching]);
@@ -1326,22 +1386,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         // Скролл вниз
         if (isAtBottom) {
           intentionalScrollUp = false;
-          
-          // Если достигли низа и включена пагинация после, проверяем наличие новых сообщений
-          if (enableAfterPagination && hasMoreMessagesAfter && messages.length > 0 && !isLoadingMoreRef.current) {
-            const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-            const newestMessage = sortedMsgs[sortedMsgs.length - 1];
-            
-            if (newestMessage && lastAfterIdRef.current !== newestMessage.id) {
-              console.log('At bottom, checking for new messages after:', newestMessage.id);
-              isLoadingMoreRef.current = true;
-              setLoadingMode('pagination');
-              setAfterId(newestMessage.id);
-              lastAfterIdRef.current = newestMessage.id;
-              setBeforeId(null);
-              lastBeforeIdRef.current = null;
-            }
-          }
         }
       }
       
@@ -1358,6 +1402,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       if (isAtBottom && activeChannel) {
         // Если пользователь прокрутил до конца вручную, снова включаем автопрокрутку
         setDisableAutoScroll(false);
+        
+        // НЕ отключаем enableAfterPagination здесь!
+        // Он отключится только когда получим < MESSAGES_PER_PAGE сообщений
         
         // Send bulk-read-all request when scrolling to bottom
         webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
@@ -1987,81 +2034,74 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             </Box>
           </Fade>
 
-          {/* Skeleton loader for upward pagination */}
+          {/* Loading indicator for upward pagination */}
           {loadingMode === 'pagination' && beforeId && (
             <Box sx={{ 
-              width: '100%',
-              minHeight: '400px',
-              p: 2, 
               display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-              background: 'rgba(30,30,47,0.5)',
-              borderRadius: 2,
-              mb: 2,
+              justifyContent: 'center',
+              alignItems: 'center',
+              py: 2,
+              gap: 1
             }}>
-              {[...Array(5)].map((_, index) => (
-                <Box key={`skeleton-before-${index}`} sx={{ 
-                  display: 'flex', 
-                  gap: 2, 
-                  alignItems: 'flex-start',
-                  minHeight: '80px',
-                  p: 1,
-                  flexShrink: 0
-                }}>
-                  <Skeleton 
-                    variant="circular" 
-                    width={40} 
-                    height={40} 
-                    animation="wave"
-                    sx={{ 
-                      bgcolor: 'rgba(149,128,255,0.1)',
-                      flexShrink: 0,
-                      '&::after': {
-                        background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                      }
-                    }} 
-                  />
-                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    <Skeleton 
-                      variant="text" 
-                      width={120} 
-                      height={20} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)',
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                    <Skeleton 
-                      variant="text" 
-                      width="80%" 
-                      height={16} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)',
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                    <Skeleton 
-                      variant="text" 
-                      width="60%" 
-                      height={16} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)',
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                  </Box>
-                </Box>
-              ))}
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: '#00CFFF',
+                  animation: 'pulse 1.4s infinite ease-in-out both',
+                  animationDelay: '-0.32s',
+                  '@keyframes pulse': {
+                    '0%, 80%, 100%': {
+                      transform: 'scale(0)',
+                      opacity: 0.5
+                    },
+                    '40%': {
+                      transform: 'scale(1)',
+                      opacity: 1
+                    }
+                  }
+                }}
+              />
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: '#00CFFF',
+                  animation: 'pulse 1.4s infinite ease-in-out both',
+                  animationDelay: '-0.16s',
+                  '@keyframes pulse': {
+                    '0%, 80%, 100%': {
+                      transform: 'scale(0)',
+                      opacity: 0.5
+                    },
+                    '40%': {
+                      transform: 'scale(1)',
+                      opacity: 1
+                    }
+                  }
+                }}
+              />
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: '#00CFFF',
+                  animation: 'pulse 1.4s infinite ease-in-out both',
+                  '@keyframes pulse': {
+                    '0%, 80%, 100%': {
+                      transform: 'scale(0)',
+                      opacity: 0.5
+                    },
+                    '40%': {
+                      transform: 'scale(1)',
+                      opacity: 1
+                    }
+                  }
+                }}
+              />
             </Box>
           )}
 
@@ -2073,6 +2113,46 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             let currentGroup: React.ReactElement[] = [];
             let currentDateString: string | null = null;
             let processedDates = new Set<string>();
+            
+            // Handle reply click callback
+            const handleReplyClick = (replyId: number) => {
+              // Find and scroll to the original message
+              const messageElement = document.querySelector(`[data-msg-id='${replyId}']`);
+              if (messageElement) {
+                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Clear any existing highlight timeout
+                if (highlightTimeoutRef.current) {
+                  clearTimeout(highlightTimeoutRef.current);
+                  highlightTimeoutRef.current = null;
+                }
+                
+                // Clear existing highlights and focused message
+                setFocusedMessageId(null);
+                setHighlightedMessages(new Set());
+                
+                // Highlight the new message
+                setFocusedMessageId(replyId);
+                
+                // Add to highlighted set for visual effect
+                setHighlightedMessages(() => {
+                  const newSet = new Set<number>();
+                  newSet.add(replyId);
+                  return newSet;
+                });
+                
+                // Remove highlight after 3 seconds
+                highlightTimeoutRef.current = setTimeout(() => {
+                  setHighlightedMessages(prev => {
+                    const newSet = new Set(prev);
+                    newSet.delete(replyId);
+                    return newSet;
+                  });
+                  setFocusedMessageId(null);
+                  highlightTimeoutRef.current = null;
+                }, 3000);
+              }
+            };
             
             // Combine real and temporary messages
             const allMessages = [...sortedMessages, ...Array.from(tempMessages.values())];
@@ -2142,11 +2222,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
               }
               
               const isFirstOfGroup = prevAuthorId !== msg.author.id || 
-                (prevMessageTime && !isWithinTimeThreshold(prevMessageTime, msg.created_at));
+                (prevMessageTime !== null && !isWithinTimeThreshold(prevMessageTime, msg.created_at));
 
               const isTempMessage = msg.id === -1;
 
-              const messageElement = (
+              const messageElement = editingMessageId === msg.id ? (
                 <Box
                   key={isTempMessage ? `temp-${msg.created_at}` : msg.id}
                   id={`message-${msg.id}`}
@@ -2159,31 +2239,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                     alignItems: 'flex-start',
                     position: 'relative',
                     borderRadius: '10px',
-                    transition: 'background-color 0.3s ease, box-shadow 0.5s ease',
+                    transition: 'background-color 0.3s ease',
                     opacity: isTempMessage ? 0.6 : 1,
-                    backgroundColor: focusedMessageId === msg.id
-                      ? 'rgba(0, 207, 255, 0.25)' // Bright blue highlight for focused message (reply source)
-                      : highlightedMessages.has(msg.id)
-                        ? 'rgba(33, 150, 243, 0.25)' // Bright blue highlight for search results
-                        : unreadMessages.has(msg.id)
-                          ? 'rgba(25,118,210,0.1)' // Blue for unread messages
-                          : 'transparent',
-                    '&.highlight-pulse': {
-                      animation: 'pulse 2s infinite',
-                    },
-                    '&:hover': {
-                      backgroundColor: focusedMessageId === msg.id
-                        ? 'rgba(0, 207, 255, 0.35)'
-                        : highlightedMessages.has(msg.id)
-                          ? 'rgba(33, 150, 243, 0.35)'
-                          : unreadMessages.has(msg.id) 
-                            ? 'rgba(25,118,210,0.15)' 
-                            : 'rgba(255,255,255,0.05)',
-                    },
-                    '&:hover .message-actions': {
-                      opacity: isTempMessage ? 0 : 1,
-                      pointerEvents: isTempMessage ? 'none' : 'auto',
-                    },
                   }}
                 >
                   <Box 
@@ -2218,343 +2275,104 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                             {msg.author.login}
                           </Typography>
                         )}
-                        {msg.reply && (
-                          <Box 
-                            sx={{ 
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: 1,
-                              mb: 1,
-                              cursor: 'pointer',
-                              p: '4px 8px',
-                              width: '100%',
-                              ml: -1,
-                              mr: -1,
-                              borderRadius: 1,
-                              backgroundColor: 'rgba(0, 207, 255, 0.05)',
-                              borderLeft: '3px solid #00CFFF',
-                              '&:hover': {
-                                backgroundColor: 'rgba(0, 207, 255, 0.1)'
-                              }
-                            }}
-                            onClick={() => {
-                              // Find and scroll to the original message
-                              const messageElement = document.querySelector(`[data-msg-id='${msg.reply!.id}']`);
-                              if (messageElement) {
-                                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                
-                                // Clear any existing highlight timeout
-                                if (highlightTimeoutRef.current) {
-                                  clearTimeout(highlightTimeoutRef.current);
-                                  highlightTimeoutRef.current = null;
-                                }
-                                
-                                // Clear existing highlights and focused message
-                                setFocusedMessageId(null);
-                                setHighlightedMessages(new Set());
-                                
-                                // Highlight the new message
-                                setFocusedMessageId(msg.reply!.id);
-                                
-                                // Add to highlighted set for visual effect
-                                setHighlightedMessages(() => {
-                                  const newSet = new Set<number>();
-                                  newSet.add(msg.reply!.id);
-                                  return newSet;
-                                });
-                                
-                                // Remove highlight after 3 seconds
-                                highlightTimeoutRef.current = setTimeout(() => {
-                                  setHighlightedMessages(prev => {
-                                    const newSet = new Set(prev);
-                                    newSet.delete(msg.reply!.id);
-                                    return newSet;
-                                  });
-                                  setFocusedMessageId(null);
-                                  highlightTimeoutRef.current = null;
-                                }, 3000);
-                              }
-                            }}
-                          >
-                            <ReplyIcon sx={{ color: '#00CFFF', fontSize: '0.85rem', mt: '2px' }} />
-                            <Box sx={{ flex: 1, minWidth: 0 }}>
-                              <Typography sx={{ color: '#00CFFF', fontWeight: 600, fontSize: '0.75rem', mb: 0.25 }}>
-                                {msg.reply.author.login}
-                              </Typography>
-                              <Typography 
-                                sx={{ 
-                                  color: 'rgba(255,255,255,0.6)', 
-                                  fontSize: '0.75rem',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  display: '-webkit-box',
-                                  WebkitLineClamp: 2,
-                                  WebkitBoxOrient: 'vertical'
-                                }}
-                              >
-                                {msg.reply.content}
-                              </Typography>
-                            </Box>
-                          </Box>
-                        )}
-                        {editingMessageId === msg.id ? (
-                          <Formik
-                            initialValues={{ content: msg.content }}
-                            validationSchema={messageSchema}
-                            onSubmit={handleEditMessage}
-                          >
-                            {({ handleSubmit, values, setFieldValue }) => (
-                              <Form>
+                        <Formik
+                          initialValues={{ content: msg.content }}
+                          validationSchema={messageSchema}
+                          onSubmit={handleEditMessage}
+                        >
+                          {({ handleSubmit, values, setFieldValue }) => (
+                            <Form>
+                              <Box sx={{ 
+                                display: 'flex', 
+                                flexDirection: 'column', 
+                                gap: 1,
+                                background: 'rgba(30,30,47,0.9)',
+                                borderRadius: '8px',
+                                padding: '8px',
+                                border: '1px solid rgba(255,255,255,0.1)',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                              }}>
+                                <Field
+                                  name="content"
+                                  component={Input}
+                                  multiline
+                                  fullWidth
+                                  size="small"
+                                  inputRef={editInputRef}
+                                  onKeyDown={(e: React.KeyboardEvent) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleSubmit();
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      setEditingMessageId(null);
+                                    }
+                                  }}
+                                />
                                 <Box sx={{ 
                                   display: 'flex', 
-                                  flexDirection: 'column', 
-                                  gap: 1,
-                                  background: 'rgba(30,30,47,0.9)',
-                                  borderRadius: '8px',
-                                  padding: '8px',
-                                  border: '1px solid rgba(255,255,255,0.1)',
-                                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                                  gap: 1, 
+                                  justifyContent: 'flex-end',
+                                  padding: '4px 8px',
                                 }}>
-                                  <Field
-                                    name="content"
-                                    component={Input}
-                                    multiline
-                                    fullWidth
-                                    size="small"
-                                    inputRef={editInputRef}
-                                    onKeyDown={(e: React.KeyboardEvent) => {
-                                      if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleSubmit();
-                                      } else if (e.key === 'Escape') {
-                                        e.preventDefault();
-                                        setEditingMessageId(null);
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={(e: React.FormEvent) => {
+                                      e.preventDefault();
+                                      setEditingMessageId(null);
+                                    }}
+                                    sx={{ 
+                                      color: '#d32f2f',
+                                      '&:hover': { background: 'rgba(211,47,47,0.1)' }
+                                    }}
+                                  >
+                                    <CloseIcon fontSize="small" />
+                                  </IconButton>
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={(e: React.FormEvent) => handleSubmit()}
+                                    disabled={!values.content}
+                                    sx={{ 
+                                      color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
+                                      transition: 'color 0.25s cubic-bezier(.4,0,.2,1)',
+                                      '&:hover': {
+                                        color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
                                       }
                                     }}
-                                  />
-                                  <Box sx={{ 
-                                    display: 'flex', 
-                                    gap: 1, 
-                                    justifyContent: 'flex-end',
-                                    padding: '4px 8px',
-                                  }}>
-                                    <IconButton 
-                                      size="small" 
-                                      onClick={(e: React.FormEvent) => {
-                                        e.preventDefault();
-                                        setEditingMessageId(null);
-                                      }}
-                                      sx={{ 
-                                        color: '#d32f2f',
-                                        '&:hover': { background: 'rgba(211,47,47,0.1)' }
-                                      }}
-                                    >
-                                      <CloseIcon fontSize="small" />
-                                    </IconButton>
-                                    <IconButton 
-                                      size="small" 
-                                      onClick={(e: React.FormEvent) => handleSubmit()}
-                                      disabled={!values.content}
-                                      sx={{ 
-                                        color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
-                                        transition: 'color 0.25s cubic-bezier(.4,0,.2,1)',
-                                        '&:hover': {
-                                          color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
-                                        }
-                                      }}
-                                    >
-                                      <SendIcon fontSize="small" />
-                                    </IconButton>
-                                  </Box>
+                                  >
+                                    <SendIcon fontSize="small" />
+                                  </IconButton>
                                 </Box>
-                              </Form>
-                            )}
-                          </Formik>
-                        ) : (
-                          <Box sx={{ 
-                            display: 'flex', 
-                            flexDirection: 'column',
-                            position: 'relative'
-                          }}>
-                            <Typography
-                              sx={{ 
-                                color: 'rgba(255,255,255,0.85)', 
-                                wordBreak: 'break-word', 
-                                fontSize: '1.01rem',
-                                whiteSpace: 'pre-wrap',
-                                pr: '120px',
-                                pl: 0,
-                                lineHeight: 1.4
-                              }}
-                              component="span"
-                              dangerouslySetInnerHTML={{
-                                __html: DOMPurify.sanitize(
-                                  (() => {
-                                    // Process content to highlight search terms
-                                    let content = msg.content.replace(/\r\n/g, '\n').replace(/\n/g, '<br>');
-                                    
-                                    // Highlight search terms if in search mode with non-empty query
-                                    if (searchMode && searchQuery.trim()) {
-                                      const query = searchQuery.trim();
-                                      // Escape special regex characters in the search query
-                                      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                      // Create a regular expression that matches the whole word case-insensitive
-                                      const regex = new RegExp(`(${escapedQuery})`, 'gi');
-                                      // Replace with highlighted version
-                                      content = content.replace(regex, '<span style="background-color: rgba(0, 207, 255, 0.3); color: #fff; border-radius: 2px; padding: 0; font-weight: 600;">$1</span>');
-                                    }
-                                    
-                                    return content;
-                                  })()
-                                )
-                              }}
-                            />
-                            <Box sx={{ 
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 0.5,
-                              position: 'absolute',
-                              top: 0,
-                              right: 0,
-                            }}>
-                              {msg.last_modified_at && msg.last_modified_at !== msg.created_at && (
-                                <span style={{ 
-                                  color: '#90caf9', 
-                                  fontSize: '0.85em', 
-                                  fontStyle: 'italic',
-                                  fontWeight: 500
-                                }}>ред.</span>
-                              )}
-                              {msg.author.id === user.id && (
-                                <Box
-                                  sx={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 0.5,
-                                    mr: 0.5
-                                  }}
-                                >
-                                  <DoneAllIcon 
-                                    sx={{ 
-                                      fontSize: '1rem',
-                                      color: msg.read_by_count && msg.read_by_count > 0 ? '#FF69B4' : 'rgba(255,255,255,0.35)'
-                                    }} 
-                                  />
-                                </Box>
-                              )}
-                              <Typography sx={{ 
-                                color: 'rgba(255,255,255,0.35)', 
-                                fontSize: '0.78rem', 
-                                lineHeight: 1,
-                                whiteSpace: 'nowrap',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 0.5
-                              }}>
-                                {formatMessageTime(msg.created_at)}
-                              </Typography>
-                            </Box>
-                          </Box>
-                        )}
+                              </Box>
+                            </Form>
+                          )}
+                        </Formik>
                       </Box>
                     </Box>
-                    {!isTempMessage && (
-                      <Box
-                        className="message-actions"
-                        sx={{
-                          position: 'absolute',
-                          top: -38,
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          display: 'flex',
-                          gap: 1,
-                          opacity: 0,
-                          pointerEvents: 'none',
-                          transition: 'opacity 0.2s',
-                          zIndex: 10,
-                          background: 'rgba(20,20,35,0.85)',
-                          borderRadius: 2,
-                          boxShadow: '0 8px 24px 0 rgba(0,0,0,0.3), 0 0 12px 0 rgba(149,128,255,0.2)',
-                          px: 1.5,
-                          py: 0.5,
-                          border: '1px solid rgba(149,128,255,0.25)',
-                          backdropFilter: 'blur(12px)',
-                        }}
-                      >
-                        <Tooltip title="Ответить" enterDelay={1000} placement="top">
-                          <IconButton 
-                            size="small" 
-                            onClick={() => {
-                              console.log('Setting reply message:', msg);
-                              setReplyingToMessage(msg);
-                              focusMessageInput();
-                            }} 
-                            sx={{ 
-                              color: '#00FFBA', 
-                              transition: 'all 0.2s ease',
-                              padding: '6px',
-                              backgroundColor: 'rgba(0, 255, 186, 0.12)',
-                              '&:hover': { 
-                                color: '#00FFBA',
-                                backgroundColor: 'rgba(0, 255, 186, 0.25)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 4px 8px rgba(0, 255, 186, 0.3)'
-                              } 
-                            }}
-                          >
-                            <ReplyIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        
-                        {/* Edit button only for user's own messages */}
-                        {msg.author.id === user.id && (
-                          <Tooltip title="Редактировать" enterDelay={1000} placement="top">
-                            <IconButton 
-                              size="small" 
-                              onClick={() => setEditingMessageId(msg.id)} 
-                              sx={{ 
-                                color: '#00CFFF', 
-                                transition: 'all 0.2s ease',
-                                padding: '6px',
-                                backgroundColor: 'rgba(0, 207, 255, 0.12)',
-                                '&:hover': { 
-                                  color: '#00CFFF',
-                                  backgroundColor: 'rgba(0, 207, 255, 0.25)',
-                                  transform: 'translateY(-2px)',
-                                  boxShadow: '0 4px 8px rgba(0, 207, 255, 0.3)'
-                                } 
-                              }}
-                            >
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        
-                        {/* Delete button for all messages */}
-                        <Tooltip title="Удалить" enterDelay={1000} placement="top">
-                          <IconButton 
-                            size="small" 
-                            onClick={() => handleDeleteMessage(msg.id)} 
-                            sx={{ 
-                              color: '#FF3D71', 
-                              transition: 'all 0.2s ease',
-                              padding: '6px',
-                              backgroundColor: 'rgba(255, 61, 113, 0.12)',
-                              '&:hover': { 
-                                color: '#FF3D71',
-                                backgroundColor: 'rgba(255, 61, 113, 0.25)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 4px 8px rgba(255, 61, 113, 0.3)'
-                              } 
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    )}
                   </Box>
                 </Box>
+              ) : (
+                <ChatMessageItem
+                  key={isTempMessage ? `temp-${msg.created_at}` : msg.id}
+                  message={msg}
+                  isFirstOfGroup={isFirstOfGroup}
+                  isTempMessage={isTempMessage}
+                  isHighlighted={highlightedMessages.has(msg.id)}
+                  isUnread={unreadMessages.has(msg.id)}
+                  isFocused={focusedMessageId === msg.id}
+                  isSearchMode={searchMode}
+                  searchQuery={searchQuery}
+                  currentUserId={user.id}
+                  hubId={hubId}
+                  onReply={(message) => {
+                    console.log('Setting reply message:', message);
+                    setReplyingToMessage(message);
+                    focusMessageInput();
+                  }}
+                  onEdit={(messageId) => setEditingMessageId(messageId)}
+                  onDelete={(messageId) => handleDeleteMessage(messageId)}
+                  onReplyClick={handleReplyClick}
+                />
               );
 
               currentGroup.push(messageElement);
@@ -2566,82 +2384,75 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
               result.push(...currentGroup);
             }
             
-            // Add skeleton loader for downward pagination
+            // Add loading indicator for downward pagination
             if (loadingMode === 'pagination' && afterId) {
               result.push(
-                <Box key="skeleton-after" sx={{ 
-                  width: '100%',
-                  minHeight: '400px',
-                  p: 2, 
+                <Box key="loading-after" sx={{ 
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                  background: 'rgba(30,30,47,0.5)',
-                  borderRadius: 2,
-                  mt: 2,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  py: 2,
+                  gap: 1
                 }}>
-                  {[...Array(5)].map((_, index) => (
-                    <Box key={`skeleton-after-${index}`} sx={{ 
-                      display: 'flex', 
-                      gap: 2, 
-                      alignItems: 'flex-start',
-                      minHeight: '80px',
-                      p: 1,
-                      flexShrink: 0
-                    }}>
-                      <Skeleton 
-                        variant="circular" 
-                        width={40} 
-                        height={40} 
-                        animation="wave"
-                        sx={{ 
-                          bgcolor: 'rgba(149,128,255,0.1)',
-                          flexShrink: 0,
-                          '&::after': {
-                            background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                          }
-                        }} 
-                      />
-                      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                        <Skeleton 
-                          variant="text" 
-                          width={120} 
-                          height={20} 
-                          animation="wave"
-                          sx={{ 
-                            bgcolor: 'rgba(149,128,255,0.1)',
-                            '&::after': {
-                              background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                            }
-                          }} 
-                        />
-                        <Skeleton 
-                          variant="text" 
-                          width="80%" 
-                          height={16} 
-                          animation="wave"
-                          sx={{ 
-                            bgcolor: 'rgba(149,128,255,0.1)',
-                            '&::after': {
-                              background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                            }
-                          }} 
-                        />
-                        <Skeleton 
-                          variant="text" 
-                          width="60%" 
-                          height={16} 
-                          animation="wave"
-                          sx={{ 
-                            bgcolor: 'rgba(149,128,255,0.1)',
-                            '&::after': {
-                              background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                            }
-                          }} 
-                        />
-                      </Box>
-                    </Box>
-                  ))}
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      backgroundColor: '#00CFFF',
+                      animation: 'pulse 1.4s infinite ease-in-out both',
+                      animationDelay: '-0.32s',
+                      '@keyframes pulse': {
+                        '0%, 80%, 100%': {
+                          transform: 'scale(0)',
+                          opacity: 0.5
+                        },
+                        '40%': {
+                          transform: 'scale(1)',
+                          opacity: 1
+                        }
+                      }
+                    }}
+                  />
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      backgroundColor: '#00CFFF',
+                      animation: 'pulse 1.4s infinite ease-in-out both',
+                      animationDelay: '-0.16s',
+                      '@keyframes pulse': {
+                        '0%, 80%, 100%': {
+                          transform: 'scale(0)',
+                          opacity: 0.5
+                        },
+                        '40%': {
+                          transform: 'scale(1)',
+                          opacity: 1
+                        }
+                      }
+                    }}
+                  />
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      backgroundColor: '#00CFFF',
+                      animation: 'pulse 1.4s infinite ease-in-out both',
+                      '@keyframes pulse': {
+                        '0%, 80%, 100%': {
+                          transform: 'scale(0)',
+                          opacity: 0.5
+                        },
+                        '40%': {
+                          transform: 'scale(1)',
+                          opacity: 1
+                        }
+                      }
+                    }}
+                  />
                 </Box>
               );
             }
@@ -3050,8 +2861,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                       setTimeout(() => {
                         setAroundMessageId(msg.id);
                         setIsJumpingToMessage(false); // Разблокируем запросы
-                        // Включаем пагинацию вниз после перехода к сообщению
-                        setEnableAfterPagination(true);
+                        // НЕ включаем enableAfterPagination здесь - around запрос сам включит его
                       }, 100);
                       
                       console.log(`Jumping to message ID: ${msg.id} using around parameter`);

@@ -934,7 +934,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Вычисляем расстояние до низа
       const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
       
-      // Загружаем больше сообщений при скролле вверх
+      // Загружаем больше сообщений при скролле вверх (когда остается 20% от верха)
       const scrollPercentFromTop = (container.scrollTop / container.scrollHeight) * 100;
       
       // Debug logging
@@ -943,16 +943,16 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           scrollTop: container.scrollTop,
           scrollHeight: container.scrollHeight,
           scrollPercentFromTop,
-          threshold: container.scrollHeight / 4,
+          threshold: container.scrollHeight * 0.2,
           isPaginationBlocked,
           hasMoreMessages,
           messagesLength: messages.length,
           loadingMode,
-          condition: container.scrollTop < container.scrollHeight / 4
+          condition: container.scrollTop < container.scrollHeight * 0.2
         });
       }
       
-      if (container.scrollTop < container.scrollHeight / 4 && !isPaginationBlocked && hasMoreMessages && messages.length > 0) {
+      if (container.scrollTop < container.scrollHeight * 0.2 && !isPaginationBlocked && hasMoreMessages && messages.length > 0) {
         // Only load more if we have messages
         if (messages.length >= MESSAGES_PER_PAGE) {
           console.log('Loading more messages due to scroll position (UP)');
@@ -977,8 +977,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         }
       }
       
-      // Загружаем больше сообщений при скролле вниз
-      if (scrollBottom < container.clientHeight / 4 && !isPaginationBlocked && hasMoreMessagesAfter && enableAfterPagination && messages.length > 0) {
+      // Загружаем больше сообщений при скролле вниз (когда остается 20% до конца)
+      if (scrollBottom < container.clientHeight * 0.2 && !isPaginationBlocked && hasMoreMessagesAfter && enableAfterPagination && messages.length > 0) {
         // Only load more if we have messages
         if (messages.length >= MESSAGES_PER_PAGE) {
           console.log('Loading more messages due to scroll position (DOWN)');
@@ -1138,21 +1138,29 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         return mergedMessages;
       });
 
-      // Use a more direct approach to maintain scroll position
+      // Корректируем позицию скролла после загрузки
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          // Get the new scroll height after adding messages
+        setTimeout(() => {
           const scrollHeightAfter = container.scrollHeight;
-          
-          // Calculate how much height was added at the top
           const heightAdded = scrollHeightAfter - scrollHeightBefore;
           
-          // Adjust the scroll position by the exact amount of height added
-          container.scrollTop = scrollPositionBefore + heightAdded;
+          // Вычисляем целевую позицию скролла
+          const targetScrollTop = scrollPositionBefore + heightAdded;
+          
+          // Устанавливаем позицию скролла
+          container.scrollTop = targetScrollTop;
+          
+          // Проверяем, не остались ли мы слишком близко к верху после корректировки
+          // Если да, сдвигаем немного вниз, чтобы предотвратить повторную загрузку
+          if (container.scrollTop < 100) {
+            // Сдвигаем скролл на 150 пикселей вниз от верха
+            container.scrollTop = 150;
+            console.log('Prevented scroll sticking to top, moved to:', container.scrollTop);
+          }
           
           isLoadingMoreRef.current = false;
           setLoadingMode(null);
-        });
+        }, 50);
       });
     }
   }, [messagesData, beforeId, convertToExtendedMessage, loadingMode, isLoading, isFetching]);
@@ -1815,20 +1823,50 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
 
   const renderSkeleton = () => (
-    <Box sx={{ 
-      flex: 1, 
-      p: 3, 
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 2,
-    }}>
-      {[...Array(5)].map((_, index) => (
+      <Box sx={{ 
+        flex: 1, 
+        height: '100%',
+        p: 3, 
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+      }}>
+        {[...Array(MESSAGES_PER_PAGE)].map((_, index) => (
         <Box key={index} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-          <Skeleton variant="circular" width={40} height={40} sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
+          <Skeleton 
+            variant="circular" 
+            width={40} 
+            height={40} 
+            animation="wave"
+            sx={{ 
+              bgcolor: 'rgba(255,255,255,0.1)',
+              flexShrink: 0,
+            }} 
+          />
           <Box sx={{ flex: 1 }}>
-            <Skeleton variant="text" width={120} height={24} sx={{ bgcolor: 'rgba(255,255,255,0.1)', mb: 1 }} />
-            <Skeleton variant="text" width="80%" height={20} sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
-            <Skeleton variant="text" width="60%" height={20} sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
+            <Skeleton 
+              variant="text" 
+              width={120} 
+              height={24} 
+              animation="wave"
+              sx={{ bgcolor: 'rgba(255,255,255,0.1)', mb: 1 }} 
+            />
+            <Skeleton 
+              variant="text" 
+              width="80%" 
+              height={20} 
+              animation="wave"
+              sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} 
+            />
+            <Skeleton 
+              variant="text" 
+              width="60%" 
+              height={20} 
+              animation="wave"
+              sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} 
+            />
           </Box>
         </Box>
       ))}
@@ -1963,7 +2001,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
               mb: 2,
             }}>
               {[...Array(5)].map((_, index) => (
-                <Box key={`skeleton-before-${index}`} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+                <Box key={`skeleton-before-${index}`} sx={{ 
+                  display: 'flex', 
+                  gap: 2, 
+                  alignItems: 'flex-start',
+                  minHeight: '80px',
+                  p: 1,
+                  flexShrink: 0
+                }}>
                   <Skeleton 
                     variant="circular" 
                     width={40} 
@@ -1971,28 +2016,16 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                     animation="wave"
                     sx={{ 
                       bgcolor: 'rgba(149,128,255,0.1)',
+                      flexShrink: 0,
                       '&::after': {
                         background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
                       }
                     }} 
                   />
-                  <Box sx={{ flex: 1 }}>
+                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                     <Skeleton 
                       variant="text" 
                       width={120} 
-                      height={24} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)', 
-                        mb: 1,
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                    <Skeleton 
-                      variant="text" 
-                      width="80%" 
                       height={20} 
                       animation="wave"
                       sx={{ 
@@ -2004,8 +2037,20 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                     />
                     <Skeleton 
                       variant="text" 
+                      width="80%" 
+                      height={16} 
+                      animation="wave"
+                      sx={{ 
+                        bgcolor: 'rgba(149,128,255,0.1)',
+                        '&::after': {
+                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
+                        }
+                      }} 
+                    />
+                    <Skeleton 
+                      variant="text" 
                       width="60%" 
-                      height={20} 
+                      height={16} 
                       animation="wave"
                       sx={{ 
                         bgcolor: 'rgba(149,128,255,0.1)',
@@ -2528,17 +2573,27 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           {loadingMode === 'pagination' && afterId && (
             <Box sx={{ 
               width: '100%',
-              minHeight: '400px',
+              height: 'auto',
+              maxHeight: '600px',
               p: 2, 
               display: 'flex',
               flexDirection: 'column',
-              gap: 2,
+              gap: 1,
               background: 'rgba(30,30,47,0.5)',
               borderRadius: 2,
               mt: 2,
+              overflowY: 'auto',
+              overflowX: 'hidden',
             }}>
               {[...Array(5)].map((_, index) => (
-                <Box key={`skeleton-after-${index}`} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+                <Box key={`skeleton-after-${index}`} sx={{ 
+                  display: 'flex', 
+                  gap: 2, 
+                  alignItems: 'flex-start',
+                  minHeight: '80px',
+                  p: 1,
+                  flexShrink: 0
+                }}>
                   <Skeleton 
                     variant="circular" 
                     width={40} 
@@ -2546,28 +2601,16 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                     animation="wave"
                     sx={{ 
                       bgcolor: 'rgba(149,128,255,0.1)',
+                      flexShrink: 0,
                       '&::after': {
                         background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
                       }
                     }} 
                   />
-                  <Box sx={{ flex: 1 }}>
+                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                     <Skeleton 
                       variant="text" 
                       width={120} 
-                      height={24} 
-                      animation="wave"
-                      sx={{ 
-                        bgcolor: 'rgba(149,128,255,0.1)', 
-                        mb: 1,
-                        '&::after': {
-                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
-                        }
-                      }} 
-                    />
-                    <Skeleton 
-                      variant="text" 
-                      width="80%" 
                       height={20} 
                       animation="wave"
                       sx={{ 
@@ -2579,8 +2622,20 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                     />
                     <Skeleton 
                       variant="text" 
+                      width="80%" 
+                      height={16} 
+                      animation="wave"
+                      sx={{ 
+                        bgcolor: 'rgba(149,128,255,0.1)',
+                        '&::after': {
+                          background: 'linear-gradient(90deg, transparent, rgba(149,128,255,0.1), transparent)'
+                        }
+                      }} 
+                    />
+                    <Skeleton 
+                      variant="text" 
                       width="60%" 
-                      height={20} 
+                      height={16} 
                       animation="wave"
                       sx={{ 
                         bgcolor: 'rgba(149,128,255,0.1)',

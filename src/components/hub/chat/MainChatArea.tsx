@@ -390,6 +390,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const handleScrollToBottom = useCallback(() => {
     // Разрешаем автопрокрутку, так как пользователь явно запросил прокрутку вниз
     setDisableAutoScroll(false);
+    
+    // Если мы находимся в режиме around или jumping, сначала сбрасываем эти состояния
+    if (loadingMode === 'around' || isJumpingToMessage) {
+      setLoadingMode('initial');
+      setIsJumpingToMessage(false);
+      setTargetMessageId(null);
+      setAroundMessageId(null);
+    }
         
     // Сбрасываем все параметры пагинации для загрузки самых новых сообщений
     setBeforeId(null);
@@ -400,17 +408,17 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setHasMoreMessages(true);
     setHasMoreMessagesAfter(true);
     
-    // Устанавливаем режим загрузки как initial для получения последних сообщений
-    setLoadingMode('initial');
-    
     // Очищаем временные сообщения
     setTempMessages(new Map());
     
+    // Разблокируем основной запрос ПЕРЕД установкой режима загрузки
+    setSkipMainQuery(false);
+    
+    // Устанавливаем режим загрузки как initial для получения последних сообщений
+    setLoadingMode('initial');
+    
     // Блокируем пагинацию на время загрузки
     isLoadingMoreRef.current = true;
-    
-    // Форсируем новый запрос без параметров пагинации (получим самые новые)
-    refetchMessages();
     
     // Send bulk-read-all request when scrolling to bottom
     if (activeChannel) {
@@ -422,7 +430,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setUnreadCount(0);
     setNewMessagesCount(0);
     setHasNewMessage(false);
-  }, [activeChannel, refetchMessages]);
+    
+    // Прокручиваем вниз после небольшой задержки
+    setTimeout(() => {
+      scrollToBottom(false);
+    }, 100);
+  }, [activeChannel, loadingMode, isJumpingToMessage, scrollToBottom]);
 
   // Helper function to convert Message to ExtendedMessage
   const convertToExtendedMessage = useCallback((message: Message): ExtendedMessage => {
@@ -2014,41 +2027,70 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             
             // Handle reply click callback
             const handleReplyClick = (replyId: number) => {
-              // Find and scroll to the original message
-              const messageElement = document.querySelector(`[data-msg-id='${replyId}']`);
-              if (messageElement) {
-                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Clear any existing highlight timeout
-                if (highlightTimeoutRef.current) {
-                  clearTimeout(highlightTimeoutRef.current);
-                  highlightTimeoutRef.current = null;
-                }
-                
-                // Clear existing highlights and focused message
-                setFocusedMessageId(null);
-                setHighlightedMessages(new Set());
-                
-                // Highlight the new message
-                setFocusedMessageId(replyId);
-                
-                // Add to highlighted set for visual effect
-                setHighlightedMessages(() => {
-                  const newSet = new Set<number>();
-                  newSet.add(replyId);
-                  return newSet;
-                });
-                
-                // Remove highlight after 1.5 seconds
-                highlightTimeoutRef.current = setTimeout(() => {
-                  setHighlightedMessages(prev => {
-                    const newSet = new Set(prev);
-                    newSet.delete(replyId);
+              // Check if message exists in current list
+              const messageExists = sortedMessages.some(msg => msg.id === replyId);
+              
+              if (messageExists) {
+                // Message is in current view, just scroll to it
+                const messageElement = document.querySelector(`[data-msg-id='${replyId}']`);
+                if (messageElement) {
+                  messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  
+                  // Clear any existing highlight timeout
+                  if (highlightTimeoutRef.current) {
+                    clearTimeout(highlightTimeoutRef.current);
+                    highlightTimeoutRef.current = null;
+                  }
+                  
+                  // Clear existing highlights and focused message
+                  setFocusedMessageId(null);
+                  setHighlightedMessages(new Set());
+                  
+                  // Highlight the new message
+                  setFocusedMessageId(replyId);
+                  
+                  // Add to highlighted set for visual effect
+                  setHighlightedMessages(() => {
+                    const newSet = new Set<number>();
+                    newSet.add(replyId);
                     return newSet;
                   });
-                  setFocusedMessageId(null);
-                  highlightTimeoutRef.current = null;
-                }, 1500);
+                  
+                  // Remove highlight after 1.5 seconds
+                  highlightTimeoutRef.current = setTimeout(() => {
+                    setHighlightedMessages(prev => {
+                      const newSet = new Set(prev);
+                      newSet.delete(replyId);
+                      return newSet;
+                    });
+                    setFocusedMessageId(null);
+                    highlightTimeoutRef.current = null;
+                  }, 1500);
+                }
+              } else {
+                // Message not in current view, load around it
+                // Блокируем все операции во время перехода
+                setIsJumpingToMessage(true);
+                setSkipMainQuery(true);
+                isLoadingMoreRef.current = true;
+                
+                // Очищаем предыдущие состояния
+                setMessages([]);
+                setTempMessages(new Map());
+                setBeforeId(null);
+                setAfterId(null);
+                lastBeforeIdRef.current = null;
+                lastAfterIdRef.current = null;
+                setHasMoreMessages(true);
+                setHasMoreMessagesAfter(true);
+                setEnableAfterPagination(true);
+                
+                // Устанавливаем целевое сообщение и режим загрузки
+                setTargetMessageId(replyId);
+                setAroundMessageId(replyId);
+                setLoadingMode('around');
+                
+                // После загрузки around эффект автоматически прокрутит к сообщению
               }
             };
             

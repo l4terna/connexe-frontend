@@ -1,8 +1,6 @@
 import React from 'react';
-import { Box, IconButton, Tooltip, Typography } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
-import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
 import ReplyIcon from '@mui/icons-material/Reply';
 import UserAvatar from '../../UserAvatar';
 import DOMPurify from 'dompurify';
@@ -48,6 +46,8 @@ interface ChatMessageItemProps {
   onEdit: (messageId: number) => void;
   onDelete: (messageId: number) => void;
   onReplyClick: (replyId: number) => void;
+  onMouseEnter?: (event: React.MouseEvent<HTMLDivElement>, message: ExtendedMessage) => void;
+  onMouseLeave?: () => void;
 }
 
 const formatMessageTime = (timestamp: string) => {
@@ -74,6 +74,8 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
   onEdit,
   onDelete,
   onReplyClick,
+  onMouseEnter,
+  onMouseLeave,
 }) => {
   return (
     <Box
@@ -81,6 +83,8 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
       className="message-item"
       data-date={message.created_at}
       data-msg-id={message.id.toString()}
+      onMouseEnter={(e) => !isTempMessage && onMouseEnter?.(e, message)}
+      onMouseLeave={() => !isTempMessage && onMouseLeave?.()}
       sx={{
         display: 'flex',
         gap: 2,
@@ -107,10 +111,6 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
               : isUnread 
                 ? 'rgba(25,118,210,0.15)' 
                 : 'rgba(255,255,255,0.05)',
-        },
-        '&:hover .message-actions': {
-          opacity: isTempMessage ? 0 : 1,
-          pointerEvents: isTempMessage ? 'none' : 'auto',
         },
       }}
     >
@@ -233,6 +233,7 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
                 position: 'absolute',
                 top: 0,
                 right: 0,
+                padding: '0 8px',
               }}>
                 {message.last_modified_at && message.last_modified_at !== message.created_at && (
                   <span style={{ 
@@ -274,97 +275,6 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
             </Box>
           </Box>
         </Box>
-        {!isTempMessage && (
-          <Box
-            className="message-actions"
-            sx={{
-              position: 'absolute',
-              top: -38,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              gap: 1,
-              opacity: 0,
-              pointerEvents: 'none',
-              transition: 'opacity 0.2s',
-              zIndex: 10,
-              background: 'rgba(20,20,35,0.85)',
-              borderRadius: 2,
-              boxShadow: '0 8px 24px 0 rgba(0,0,0,0.3), 0 0 12px 0 rgba(149,128,255,0.2)',
-              px: 1.5,
-              py: 0.5,
-              border: '1px solid rgba(149,128,255,0.25)',
-              backdropFilter: 'blur(12px)',
-            }}
-          >
-            <Tooltip title="Ответить" enterDelay={1000} placement="top">
-              <IconButton 
-                size="small" 
-                onClick={() => onReply(message)} 
-                sx={{ 
-                  color: '#00FFBA', 
-                  transition: 'all 0.2s ease',
-                  padding: '6px',
-                  backgroundColor: 'rgba(0, 255, 186, 0.12)',
-                  '&:hover': { 
-                    color: '#00FFBA',
-                    backgroundColor: 'rgba(0, 255, 186, 0.25)',
-                    transform: 'translateY(-2px)',
-                    boxShadow: '0 4px 8px rgba(0, 255, 186, 0.3)'
-                  } 
-                }}
-              >
-                <ReplyIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            
-            {/* Edit button only for user's own messages */}
-            {message.author.id === currentUserId && (
-              <Tooltip title="Редактировать" enterDelay={1000} placement="top">
-                <IconButton 
-                  size="small" 
-                  onClick={() => onEdit(message.id)} 
-                  sx={{ 
-                    color: '#00CFFF', 
-                    transition: 'all 0.2s ease',
-                    padding: '6px',
-                    backgroundColor: 'rgba(0, 207, 255, 0.12)',
-                    '&:hover': { 
-                      color: '#00CFFF',
-                      backgroundColor: 'rgba(0, 207, 255, 0.25)',
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 8px rgba(0, 207, 255, 0.3)'
-                    } 
-                  }}
-                >
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            
-            {/* Delete button for all messages */}
-            <Tooltip title="Удалить" enterDelay={1000} placement="top">
-              <IconButton 
-                size="small" 
-                onClick={() => onDelete(message.id)} 
-                sx={{ 
-                  color: '#FF3D71', 
-                  transition: 'all 0.2s ease',
-                  padding: '6px',
-                  backgroundColor: 'rgba(255, 61, 113, 0.12)',
-                  '&:hover': { 
-                    color: '#FF3D71',
-                    backgroundColor: 'rgba(255, 61, 113, 0.25)',
-                    transform: 'translateY(-2px)',
-                    boxShadow: '0 4px 8px rgba(255, 61, 113, 0.3)'
-                  } 
-                }}
-              >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
       </Box>
     </Box>
   );

@@ -15,8 +15,6 @@ import Input from '../../common/Input';
 import DOMPurify from 'dompurify';
 import { useNotification } from '@/context/NotificationContext';
 import { hasPermission } from '@/utils/rolePermissions';
-import { useWebSocket } from '@/websocket/useWebSocket';
-import { webSocketService } from '@/websocket/WebSocketService';
 import AppModal from '../../AppModal';
 import ChatMessageItem from './ChatMessageItem';
 import MessageActionsPortal from './MessageActionsPortal';
@@ -24,6 +22,7 @@ import { useMessagePagination } from './hooks/useMessagePagination';
 import { useMessageReadStatus } from './hooks/useMessageReadStatus';
 import { useMessageScroll } from './hooks/useMessageScroll';
 import { useMessageSearch } from './hooks/useMessageSearch';
+import { useMessageWebSocket } from './hooks/useMessageWebSocket';
 
 enum MessageStatus {
   SENT = 0,
@@ -104,7 +103,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   
   // Использование хука для работы с прочитанными сообщениями
-  const { markAllMessagesAsRead, addToReadBuffer } = useMessageReadStatus({
+  const { markAllMessagesAsRead, addToReadBuffer, unreadMessagesBufferRef } = useMessageReadStatus({
     activeChannel,
     user
   });
@@ -170,9 +169,166 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     }
   });
   
-  
   // Состояние для целевого сообщения при переходе из поиска
   const [targetMessageId, setTargetMessageId] = useState<number | null>(null);
+  
+  // Helper function to convert Message to ExtendedMessage
+  const convertToExtendedMessage = useCallback((message: Message): ExtendedMessage => {
+    return {
+      ...message,
+      status: 'status' in message ? (message as any).status : MessageStatus.SENT // Use existing status or default to SENT
+      // reply field is already preserved via spread operator
+    };
+  }, []);
+  
+  // Использование хука WebSocket для обработки сообщений
+  useMessageWebSocket(
+    activeChannel,
+    user,
+    {
+      onMessageCreate: useCallback((newMessage: ExtendedMessage) => {
+        setMessages(prevMessages => {
+          // Check if message already exists
+          const messageExists = prevMessages.some(msg => msg.id === newMessage.id);
+          if (messageExists) return prevMessages;
+          
+          // Add new message
+          return [...prevMessages, newMessage];
+        });
+      }, []),
+      
+      onMessageUpdate: useCallback((updatedMessage: ExtendedMessage) => {
+        setMessages(prevMessages => {
+          // Check if message exists in our list
+          const messageExists = prevMessages.some(msg => msg.id === updatedMessage.id);
+          if (!messageExists) return prevMessages;
+
+          // Update the message
+          return prevMessages.map(msg => 
+            msg.id === updatedMessage.id ? updatedMessage : msg
+          );
+        });
+      }, []),
+      
+      onMessageDelete: useCallback((messageId: number) => {
+        setMessages(prevMessages => {
+          // Check if message exists in our list
+          const messageExists = prevMessages.some(msg => msg.id === messageId);
+          if (!messageExists) return prevMessages;
+
+          // Remove the message and update replies to that message
+          const filtered = prevMessages.filter(msg => msg.id !== messageId);
+          
+          // Update all messages that were replies to the deleted message
+          return filtered.map(msg => {
+            if (msg.reply && msg.reply.id === messageId) {
+              // If this was a reply to the deleted message, remove the reply reference
+              return { ...msg, reply: undefined };
+            }
+            return msg;
+          });
+        });
+      }, []),
+      
+      onMessageReadStatus: useCallback((range: { from: number; to: number }) => {
+        // Увеличиваем read_by_count для всех сообщений в диапазоне от from до to включительно
+        setMessages(prevMessages => {
+          return prevMessages.map(msg => {
+            // Проверяем, что сообщение входит в диапазон и принадлежит текущему пользователю
+            if (msg.id >= range.from && msg.id <= range.to && msg.author.id === user.id) {
+              // Увеличиваем счетчик прочтений на 1
+              const currentCount = msg.read_by_count || 0;
+              return {
+                ...msg,
+                read_by_count: currentCount + 1
+              };
+            }
+            return msg;
+          });
+        });
+      }, [user.id]),
+      
+      onHighlightMessage: useCallback((messageId: number, duration: number = 1500) => {
+        setHighlightedMessages(prev => {
+          const newSet = new Set(prev);
+          newSet.add(messageId);
+          return newSet;
+        });
+        
+        // Remove highlight after duration
+        setTimeout(() => {
+          setHighlightedMessages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(messageId);
+            return newSet;
+          });
+        }, duration);
+      }, [setHighlightedMessages]),
+      
+      onUnreadMessage: useCallback((messageId: number) => {
+        setUnreadMessages(prev => {
+          const newSet = new Set(prev);
+          newSet.add(messageId);
+          return newSet;
+        });
+        setUnreadCount(prev => prev + 1);
+        setNewMessagesCount(prev => prev + 1);
+      }, []),
+      
+      onMarkMessageAsRead: useCallback((messageId: number) => {
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId && msg.author.id !== user.id
+            ? { ...msg, status: MessageStatus.READ }
+            : msg
+        ));
+        
+        setUnreadMessages(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(messageId);
+          return newSet;
+        });
+        setUnreadCount(prev => Math.max(0, prev - 1));
+        setNewMessagesCount(prev => Math.max(0, prev - 1));
+      }, [user.id]),
+      
+      onNewMessageIndicator: useCallback(() => {
+        // This was for setHasNewMessage which we removed
+        // We can leave this empty or use it for other indicators
+      }, []),
+      
+      onScrollToBottom: useCallback(() => {
+        scrollToBottom();
+      }, [scrollToBottom]),
+      
+      onMarkAllAsRead: useCallback(() => {
+        // Update all messages to READ status
+        setMessages(prev => prev.map(msg => (
+          msg.author.id !== user.id 
+            ? { ...msg, status: MessageStatus.READ }
+            : msg
+        )));
+        
+        // Clear all unread indicators
+        setUnreadMessages(new Set());
+        setUnreadCount(0);
+        setNewMessagesCount(0);
+      }, [user.id]),
+      
+      onUnreadCountChange: useCallback((change: number) => {
+        setUnreadCount(prev => Math.max(0, prev + change));
+        setNewMessagesCount(prev => Math.max(0, prev + change));
+      }, [])
+    },
+    {
+      messagesContainerRef: messagesContainerRef as React.RefObject<HTMLElement>,
+      convertToExtendedMessage,
+      isScrolledToBottom,
+      isJumpingToMessage: paginationState.isJumpingToMessage,
+      loadingMode: paginationState.loadingMode,
+      unreadMessagesBufferRef,
+      addToReadBuffer
+    }
+  );
   
   
   // Состояние для портала действий над сообщениями
@@ -230,41 +386,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   const canSendMessages = hasPermission(userPermissions, 'SEND_MESSAGES', isOwner);
   const canManageMessages = hasPermission(userPermissions, 'MANAGE_MESSAGES', isOwner);
-
-  // Функция для отписки от WebSocket топиков канала
-  const unsubscribeFromChannelTopics = useCallback((channel: Channel | null, userId: number | null, callback: (message: any) => void) => {
-    if (!channel) return;
-        
-    // Отписка от персональной очереди пользователя
-    if (userId) {
-      const userQueueTopic = `/v1/user/${userId}/queue/channels/${channel.id}/messages`;
-      webSocketService.unsubscribe(userQueueTopic, callback);
-    }
-    
-    // Отписка от общего топика канала
-    const channelTopic = `/v1/topic/channels/${channel.id}/messages`;
-    webSocketService.unsubscribe(channelTopic, callback);
-  }, []);
   
-  // Reset state when channel changes
-  useEffect(() => {
-    // Cleanup function for previous channel
-    return () => {
-      // Отписываемся от всех подписок предыдущего канала
-      if (activeChannel && user) {
-        // Используем функцию отписки, но без handleNewMessage, так как он еще не определен
-        // Вместо этого просто отписываемся от топиков через WebSocketService
-        if (user.id && activeChannel.id) {
-          const userQueueTopic = `/v1/user/${user.id}/queue/channels/${activeChannel.id}/messages`;
-          const channelTopic = `/v1/topic/channels/${activeChannel.id}/messages`;
-          
-          // Отписываемся напрямую через WebSocketService
-          webSocketService.unsubscribe(userQueueTopic, () => {});
-          webSocketService.unsubscribe(channelTopic, () => {});
-        }
-      }
-    };
-  }, [activeChannel?.id, user?.id]);
   
   // Инициализация при входе в новый канал
   useEffect(() => {
@@ -355,15 +477,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Вызываем функцию из хука, которая прокрутит вниз и отметит сообщения как прочитанные
     handleScrollToBottom();
   }, [paginationState.loadingMode, paginationState.isJumpingToMessage, handleScrollToBottom, paginationActions]);
-
-  // Helper function to convert Message to ExtendedMessage
-  const convertToExtendedMessage = useCallback((message: Message): ExtendedMessage => {
-    return {
-      ...message,
-      status: 'status' in message ? (message as any).status : MessageStatus.SENT // Use existing status or default to SENT
-      // reply field is already preserved via spread operator
-    };
-  }, []);
 
   // Handle around messages
   useEffect(() => {
@@ -1123,248 +1236,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     return () => container.removeEventListener('scroll', handleScroll);
   }, [activeChannel, paginationState.enableAfterPagination, paginationState.hasMoreMessagesAfter, messages]);
 
-  const handleNewMessage = useCallback((data: { 
-    type: 'MESSAGE_CREATE' | 'MESSAGE_UPDATE' | 'MESSAGE_DELETE' | 'MESSAGE_READ_STATUS';
-    message?: Message;
-    messageId?: number;
-    channelId?: number;
-    message_range?: { from: number; to: number };
-  }) => {
-    if (data.type === 'MESSAGE_CREATE' && data.message) {
-      const newMessage = convertToExtendedMessage(data.message);
-      
-      // Skip processing if the message is from the current user
-      if (newMessage.author.id === user.id) {
-        return;
-      }
-      
-      // Флаг для отслеживания, было ли сообщение добавлено
-      let messageWasAdded = false;
-      
-      setMessages(prevMessages => {
-        // Check if message already exists
-        const messageExists = prevMessages.some(msg => msg.id === newMessage.id);
-        if (messageExists) return prevMessages;
-
-        // Сообщение будет добавлено
-        messageWasAdded = true;
-        
-        // Add new message
-        return [...prevMessages, newMessage];
-      });
-      
-      // Add message to highlighted set for temporary visual effect (only if it was added)
-      if (messageWasAdded) {
-        setHighlightedMessages(prev => {
-          const newSet = new Set(prev);
-          newSet.add(newMessage.id);
-          return newSet;
-        });
-        
-        // Remove highlight after 1.5 seconds
-        setTimeout(() => {
-          setHighlightedMessages(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(newMessage.id);
-            return newSet;
-          });
-        }, 1500);
-      }
-      
-      // If user is at the bottom, immediately mark message as read
-      const container = messagesContainerRef.current;
-      if (container) {
-        const scrollPosition = container.scrollHeight - container.scrollTop - container.clientHeight;
-        const isAtBottom = scrollPosition < 100;
-        
-        if (isAtBottom && activeChannel) {
-          // Update message status to READ immediately
-          setMessages(prev => prev.map(msg => 
-            msg.id === newMessage.id && msg.author.id !== user.id
-              ? { ...msg, status: MessageStatus.READ }
-              : msg
-          ));
-          
-          // Add to buffer for marking as read on server
-          addToReadBuffer(newMessage.id);
-        }
-      }
-
-      // If message has NEW status and was actually added (not a duplicate)
-      if (newMessage.status === MessageStatus.NEW && messageWasAdded) {
-        const container = messagesContainerRef.current;
-        if (container) {
-          const scrollPosition = container.scrollHeight - container.scrollTop - container.clientHeight;
-          // Check if user is scrolled up significantly (more than 300px from bottom)
-          // or just a little bit (less than or equal to 300px from bottom)
-          const isScrolledUpSignificantly = scrollPosition > 300;
-          
-          if (isScrolledUpSignificantly) {
-            // Show new message indicator if scrolled up significantly
-            setUnreadMessages(prev => {
-              const newSet = new Set(prev);
-              newSet.add(newMessage.id);
-              return newSet;
-            });
-            setUnreadCount(prev => prev + 1);
-            setNewMessagesCount(prev => prev + 1);
-            
-            // Check if the message is visible in the viewport despite being scrolled up
-            // This can happen if the user is scrolled up but the new message still appears at the bottom of the visible area
-            setTimeout(() => {
-              const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
-              if (messageElement) {
-                const rect = messageElement.getBoundingClientRect();
-                const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
-                
-                if (isVisible && activeChannel) {
-                  // If visible, add to buffer for marking as read
-                  addToReadBuffer(newMessage.id);
-                  
-                  // Update message status locally
-                  setMessages(prev => prev.map(msg => 
-                    msg.id === newMessage.id
-                      ? { ...msg, status: MessageStatus.READ }
-                      : msg
-                  ));
-                  
-                  // Update unread counters
-                  setUnreadMessages(prev => {
-                    const newSet = new Set(prev);
-                    newSet.delete(newMessage.id);
-                    return newSet;
-                  });
-                  setUnreadCount(prev => Math.max(0, prev - 1));
-                  setNewMessagesCount(prev => Math.max(0, prev - 1));
-                }
-              }
-            }, 100); // Small delay to ensure DOM is updated
-          } else {
-            // If at bottom or only scrolled up a little, auto-scroll to bottom and mark as read
-            if (activeChannel) {
-              // Add to buffer for marking as read
-              addToReadBuffer(newMessage.id);
-              
-              // Auto-scroll to bottom only if not jumping to a message
-              if (paginationState.loadingMode !== 'around' && !paginationState.isJumpingToMessage) {
-                requestAnimationFrame(() => {
-                  if (container) {
-                    container.scrollTop = container.scrollHeight;
-                    
-                    // Find the message element after scrolling
-                    setTimeout(() => {
-                      const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
-                      if (messageElement) {
-                        // Ensure the message is visible in the viewport
-                        messageElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                      }
-                    }, 50);
-                  }
-                });
-              }
-              
-              markAllMessagesAsRead();
-              // Update all messages to READ status
-              setMessages(prev => prev.map(msg => (
-                msg.author.id !== user.id 
-                  ? { ...msg, status: MessageStatus.READ }
-                  : msg
-              )));
-              
-              // Clear all unread indicators
-              setUnreadMessages(new Set());
-              setUnreadCount(0);
-              setNewMessagesCount(0);
-                      }
-          }
-        }
-      }
-    } else if (data.type === 'MESSAGE_UPDATE' && data.message) {
-      const updatedMessage = convertToExtendedMessage(data.message);
-      
-      setMessages(prevMessages => {
-        // Check if message exists in our list
-        const messageExists = prevMessages.some(msg => msg.id === updatedMessage.id);
-        if (!messageExists) return prevMessages;
-
-        // Update the message
-        return prevMessages.map(msg => 
-          msg.id === updatedMessage.id ? updatedMessage : msg
-        );
-      });
-
-      // Update unread status if message status changed
-      if (updatedMessage.status === MessageStatus.READ) {
-        setUnreadMessages(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(updatedMessage.id);
-          return newSet;
-        });
-        setUnreadCount(prev => Math.max(0, prev - 1));
-        setNewMessagesCount(prev => Math.max(0, prev - 1));
-      }
-    } else if (data.type === 'MESSAGE_DELETE' && data.messageId) {
-      const { messageId } = data;
-      
-      setMessages(prevMessages => {
-        // Check if message exists in our list
-        const messageExists = prevMessages.some(msg => msg.id === messageId);
-        if (!messageExists) return prevMessages;
-
-        // Remove the message and update replies to that message
-        const filtered = prevMessages.filter(msg => msg.id !== messageId);
-        
-        // Update all messages that were replies to the deleted message
-        return filtered.map(msg => {
-          if (msg.reply && msg.reply.id === messageId) {
-            // If this was a reply to the deleted message, remove the reply reference
-            return { ...msg, reply: undefined };
-          }
-          return msg;
-        });
-      });
-
-      // Remove from unread messages if it was there
-      setUnreadMessages(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(messageId);
-        return newSet;
-      });
-      setUnreadCount(prev => Math.max(0, prev - 1));
-      setNewMessagesCount(prev => Math.max(0, prev - 1));
-    } else if (data.type === 'MESSAGE_READ_STATUS' && data.message_range) {
-      // Обработка сообщения о прочтении сообщений
-      const { from, to } = data.message_range;
-      
-      // Увеличиваем read_by_count для всех сообщений в диапазоне от from до to включительно
-      setMessages(prevMessages => {
-        return prevMessages.map(msg => {
-          // Проверяем, что сообщение входит в диапазон и принадлежит текущему пользователю
-          if (msg.id >= from && msg.id <= to && msg.author.id === user.id) {
-            // Увеличиваем счетчик прочтений на 1
-            const currentCount = msg.read_by_count || 0;
-            return {
-              ...msg,
-              read_by_count: currentCount + 1
-            };
-          }
-          return msg;
-        });
-      });
-          }
-  }, [isScrolledToBottom, user.id, activeChannel, convertToExtendedMessage, paginationState.loadingMode, paginationState.isJumpingToMessage]);
-
-  // Subscribe to user-specific queue
-  useWebSocket(
-    activeChannel && user ? `/v1/user/${user.id}/queue/channels/${activeChannel.id}/messages` : null,
-    handleNewMessage
-  );
-
-  // Subscribe to channel topic
-  useWebSocket(
-    activeChannel ? `/v1/topic/channels/${activeChannel.id}/messages` : null,
-    handleNewMessage
-  );
 
   // Debounced sending of unread messages is now handled by useMessageReadStatus hook
 
@@ -1399,14 +1270,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       if (highlightTimeoutRef.current) {
         clearTimeout(highlightTimeoutRef.current);
       }
-      
-      // Отписываемся от всех подписок при размонтировании компонента
-      if (activeChannel && user) {        
-        // Используем функцию отписки от топиков
-        unsubscribeFromChannelTopics(activeChannel, user.id, handleNewMessage);
-      }
     };
-  }, [activeChannel, user, handleNewMessage, unsubscribeFromChannelTopics]);
+  }, []);
 
   // Add effect to handle scroll to bottom
   useEffect(() => {

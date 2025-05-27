@@ -117,18 +117,28 @@ export const channelsApi = api.injectEndpoints({
         if (currentArg?.channelId !== previousArg?.channelId) {
           return true;
         }
-        // Force refetch for after queries to prevent stale data
-        if (currentArg?.params?.after || previousArg?.params?.after) {
+        
+        // Force refetch for pagination queries
+        if (currentArg?.params?.after !== previousArg?.params?.after) {
           return true;
         }
 
-        if (currentArg?.params?.before || previousArg?.params?.before) {
+        if (currentArg?.params?.before !== previousArg?.params?.before) {
           return true;
         }
-
-        // Also refetch if other parameters change
-        const shouldRefetch = JSON.stringify(currentArg) !== JSON.stringify(previousArg);
-        return shouldRefetch;
+        
+        // Force refetch for around queries
+        if (currentArg?.params?.around !== previousArg?.params?.around) {
+          return true;
+        }
+        
+        // Force refetch for search queries
+        if (currentArg?.params?.search !== previousArg?.params?.search) {
+          return true;
+        }
+        
+        // Don't refetch if only size parameter is present and hasn't changed
+        return false;
       }, 
   
     }),

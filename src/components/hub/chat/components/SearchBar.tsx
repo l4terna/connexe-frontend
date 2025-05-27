@@ -5,7 +5,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { Formik, Form, Field } from 'formik';
 import DOMPurify from 'dompurify';
-import { Message } from '../../../api/channels';
+import { Message } from '../../../../api/channels';
 
 interface SearchBarProps {
   searchMode: boolean;

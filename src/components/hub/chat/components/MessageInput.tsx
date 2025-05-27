@@ -7,8 +7,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import ReplyIcon from '@mui/icons-material/Reply';
 import { Formik, Form, Field } from 'formik';
 import * as Yup from 'yup';
-import Input from '../../common/Input';
-import { Channel } from '../../../api/channels';
+import Input from '../../../common/Input';
+import { Channel } from '../../../../api/channels';
 
 // Validation schema
 const messageSchema = Yup.object().shape({

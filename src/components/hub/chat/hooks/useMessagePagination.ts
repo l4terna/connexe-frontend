@@ -77,8 +77,6 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     
     // Загружаем больше сообщений при скролле вверх (когда остается 20% от верха)
-    const scrollPercentFromTop = (container.scrollTop / container.scrollHeight) * 100;
-    
     if (container.scrollTop < container.scrollHeight * 0.2 && !isPaginationBlocked && hasMoreMessages && messages.length > 0) {
       // Only load more if we have messages
       if (messages.length >= messagesPerPage) {

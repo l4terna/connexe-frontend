@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Box, Typography, Fade, IconButton, Button, Paper, Skeleton, Checkbox } from '@mui/material';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import SearchBar from './SearchBar';
-import MessageInput from './MessageInput';
-import MessageList from './MessageList';
+import { Box, Skeleton } from '@mui/material';
+import MessageList from './components/MessageList';
+import ChatHeader from './components/ChatHeader';
+import DeleteMessageDialog from './components/DeleteMessageDialog';
+import NewMessagesIndicator from './components/NewMessagesIndicator';
+import MessageActionsWrapper from './components/MessageActionsWrapper';
+import ChatFooter from './components/ChatFooter';
 import { useNotification } from '@/context/NotificationContext';
 import { hasPermission } from '@/utils/rolePermissions';
-import AppModal from '../../AppModal';
-import MessageActionsPortal from './MessageActionsPortal';
+
 import { 
   useGetMessagesQuery, 
   useCreateMessageMutation, 
@@ -22,6 +23,7 @@ import { useMessageReadStatus } from './hooks/useMessageReadStatus';
 import { useMessageScroll } from './hooks/useMessageScroll';
 import { useMessageSearch } from './hooks/useMessageSearch';
 import { useMessageWebSocket } from './hooks/useMessageWebSocket';
+import { useMessageState } from './hooks/useMessageState';
 import { ExtendedMessage, MessageStatus } from './types/message';
 
 // These utility functions have been moved to the MessageList component
@@ -41,10 +43,34 @@ interface MainChatAreaProps {
 const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId, userPermissions, isOwner }) => {
 
   const [sending] = useState(false);
-  const [messages, setMessages] = useState<ExtendedMessage[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ExtendedMessage | null>(null);
   const replyingToMessageRef = useRef<ExtendedMessage | null>(null);
+  
+  // Использование хука для управления состоянием сообщений
+  const {
+    messages,
+    setMessages,
+    tempMessages,
+    setTempMessages,
+    unreadMessages,
+    setUnreadMessages,
+    unreadCount,
+    newMessagesCount,
+    convertToExtendedMessage,
+    resetMessageStates,
+    updateMessageReadStatus,
+    markAllMessagesAsReadInState,
+    updateMessageReadByCount,
+    deleteMessageFromState,
+    updateMessageInState,
+    addMessageToState,
+    addUnreadMessage,
+    removeUnreadMessage,
+    updateUnreadCount,
+    resetUnreadCounts
+  } = useMessageState();
+  
   // Использование хука пагинации
   const { state: paginationState, actions: paginationActions, isLoadingMoreRef, lastBeforeIdRef, lastAfterIdRef } = useMessagePagination();
   
@@ -78,10 +104,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     user,
     onMarkAllAsRead: markAllMessagesAsRead
   });
-  const [tempMessages, setTempMessages] = useState<Map<string, ExtendedMessage>>(new Map());
-  const [unreadMessages, setUnreadMessages] = useState<Set<number>>(new Set());
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [newMessagesCount, setNewMessagesCount] = useState<number>(0);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const messagesLengthRef = useRef<number>(0);
@@ -119,15 +142,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   
   // Состояние для целевого сообщения при переходе из поиска
   const [targetMessageId, setTargetMessageId] = useState<number | null>(null);
-  
-  // Helper function to convert Message to ExtendedMessage
-  const convertToExtendedMessage = useCallback((message: Message): ExtendedMessage => {
-    return {
-      ...message,
-      status: 'status' in message ? (message as any).status : MessageStatus.SENT // Use existing status or default to SENT
-      // reply field is already preserved via spread operator
-    };
-  }, []);
+  // Храним ID последнего around запроса, чтобы не дублировать загрузку
+  const [lastAroundId, setLastAroundId] = useState<number | null>(null);
   
   // Использование хука WebSocket для обработки сообщений
   useMessageWebSocket(
@@ -135,66 +151,20 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     user,
     {
       onMessageCreate: useCallback((newMessage: ExtendedMessage) => {
-        setMessages(prevMessages => {
-          // Check if message already exists
-          const messageExists = prevMessages.some(msg => msg.id === newMessage.id);
-          if (messageExists) return prevMessages;
-          
-          // Add new message
-          return [...prevMessages, newMessage];
-        });
-      }, []),
+        addMessageToState(newMessage);
+      }, [addMessageToState]),
       
       onMessageUpdate: useCallback((updatedMessage: ExtendedMessage) => {
-        setMessages(prevMessages => {
-          // Check if message exists in our list
-          const messageExists = prevMessages.some(msg => msg.id === updatedMessage.id);
-          if (!messageExists) return prevMessages;
-
-          // Update the message
-          return prevMessages.map(msg => 
-            msg.id === updatedMessage.id ? updatedMessage : msg
-          );
-        });
-      }, []),
+        updateMessageInState(updatedMessage);
+      }, [updateMessageInState]),
       
       onMessageDelete: useCallback((messageId: number) => {
-        setMessages(prevMessages => {
-          // Check if message exists in our list
-          const messageExists = prevMessages.some(msg => msg.id === messageId);
-          if (!messageExists) return prevMessages;
-
-          // Remove the message and update replies to that message
-          const filtered = prevMessages.filter(msg => msg.id !== messageId);
-          
-          // Update all messages that were replies to the deleted message
-          return filtered.map(msg => {
-            if (msg.reply && msg.reply.id === messageId) {
-              // If this was a reply to the deleted message, remove the reply reference
-              return { ...msg, reply: undefined };
-            }
-            return msg;
-          });
-        });
-      }, []),
+        deleteMessageFromState(messageId);
+      }, [deleteMessageFromState]),
       
       onMessageReadStatus: useCallback((range: { from: number; to: number }) => {
-        // Увеличиваем read_by_count для всех сообщений в диапазоне от from до to включительно
-        setMessages(prevMessages => {
-          return prevMessages.map(msg => {
-            // Проверяем, что сообщение входит в диапазон и принадлежит текущему пользователю
-            if (msg.id >= range.from && msg.id <= range.to && msg.author.id === user.id) {
-              // Увеличиваем счетчик прочтений на 1
-              const currentCount = msg.read_by_count || 0;
-              return {
-                ...msg,
-                read_by_count: currentCount + 1
-              };
-            }
-            return msg;
-          });
-        });
-      }, [user.id]),
+        updateMessageReadByCount(range, user.id);
+      }, [updateMessageReadByCount, user.id]),
       
       onHighlightMessage: useCallback((messageId: number, duration: number = 1500) => {
         setHighlightedMessages(prev => {
@@ -214,35 +184,19 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }, [setHighlightedMessages]),
       
       onUnreadMessage: useCallback((messageId: number) => {
-        setUnreadMessages(prev => {
-          const newSet = new Set(prev);
-          newSet.add(messageId);
-          return newSet;
-        });
-        setUnreadCount(prev => prev + 1);
-        setNewMessagesCount(prev => prev + 1);
-      }, []),
+        addUnreadMessage(messageId);
+      }, [addUnreadMessage]),
       
       onMarkMessageAsRead: useCallback((messageId: number) => {
         // Update message status visually
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId && msg.author.id !== user.id
-            ? { ...msg, status: MessageStatus.READ }
-            : msg
-        ));
+        updateMessageReadStatus(messageId, user.id);
         
         // Update unread counters
-        setUnreadMessages(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(messageId);
-          return newSet;
-        });
-        setUnreadCount(prev => Math.max(0, prev - 1));
-        setNewMessagesCount(prev => Math.max(0, prev - 1));
+        removeUnreadMessage(messageId);
         
         // Mark message as read using the hook's function
         markMessageAsRead(messageId);
-      }, [user.id, markMessageAsRead]),
+      }, [updateMessageReadStatus, removeUnreadMessage, user.id, markMessageAsRead]),
       
       onNewMessageIndicator: useCallback(() => {
         // This was for setHasNewMessage which we removed
@@ -254,26 +208,16 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }, [scrollToBottom]),
       
       onMarkAllAsRead: useCallback(() => {
-        // Update all messages to READ status
-        setMessages(prev => prev.map(msg => (
-          msg.author.id !== user.id 
-            ? { ...msg, status: MessageStatus.READ }
-            : msg
-        )));
-        
-        // Clear all unread indicators
-        setUnreadMessages(new Set());
-        setUnreadCount(0);
-        setNewMessagesCount(0);
+        // Update all messages to READ status and clear unread indicators
+        markAllMessagesAsReadInState(user.id);
         
         // Mark all messages as read using the hook's function
         markAllMessagesAsRead();
-      }, [user.id, markAllMessagesAsRead]),
+      }, [markAllMessagesAsReadInState, user.id, markAllMessagesAsRead]),
       
       onUnreadCountChange: useCallback((change: number) => {
-        setUnreadCount(prev => Math.max(0, prev + change));
-        setNewMessagesCount(prev => Math.max(0, prev + change));
-      }, [])
+        updateUnreadCount(change);
+      }, [updateUnreadCount])
     },
     {
       messagesContainerRef: messagesContainerRef as React.RefObject<HTMLElement>,
@@ -300,7 +244,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Декларации функций объявлены заранее для React useCallback
 
   
-  const queryParams = activeChannel?.type === ChannelType.TEXT && !paginationState.skipMainQuery ? {
+  // Радикальное изменение: основной запрос только для initial загрузки и пагинации
+  const shouldRunMainQuery = activeChannel?.type === ChannelType.TEXT && 
+    !paginationState.skipMainQuery && 
+    (paginationState.loadingMode === 'initial' || 
+     paginationState.loadingMode === 'pagination' ||
+     (paginationState.loadingMode === null && (paginationState.beforeId !== null || paginationState.afterId !== null)));
+     
+  const queryParams = shouldRunMainQuery ? {
     channelId: activeChannel?.id ?? 0,
     params: {
       size: MESSAGES_PER_PAGE,
@@ -312,7 +263,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const { data: messagesData = [], isLoading, isFetching } = useGetMessagesQuery(
     queryParams,
     { 
-      skip: !activeChannel || activeChannel.type !== ChannelType.TEXT || paginationState.skipMainQuery,
+      skip: !shouldRunMainQuery,
       refetchOnMountOrArgChange: true,
       // Форсируем новый запрос при изменении
       refetchOnReconnect: true,
@@ -347,7 +298,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Инициализация при входе в новый канал
   useEffect(() => {
     // Reset all states when channel changes
-    setMessages([]);
+    resetMessageStates();
     paginationActions.setHasMoreMessages(true);
     paginationActions.setHasMoreMessagesAfter(true);
     paginationActions.setEnableAfterPagination(false);
@@ -357,7 +308,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setCurrentDateLabel(null);
     setShowDateLabel(false);
     setShowScrollButton(false);
-    setTempMessages(new Map());
     setIsScrolledToBottom(true);
     isLoadingMoreRef.current = false;
     lastAfterIdRef.current = null;
@@ -368,16 +318,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Сброс состояния поиска
     clearSearch();
     
-    // Clear unread state
-    setUnreadMessages(new Set());
-    setUnreadCount(0);
-    setNewMessagesCount(0);
-    
     // Clear target message state
     setTargetMessageId(null);
     paginationActions.setAroundMessageId(null);
     paginationActions.setLoadingMode('initial');
     paginationActions.setIsJumpingToMessage(false);
+    setLastAroundId(null);
     
     // Reset query control
     paginationActions.setSkipMainQuery(false);
@@ -386,7 +332,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     if (activeChannel) {
       markAllMessagesAsRead();
     }
-  }, [activeChannel?.id, markAllMessagesAsRead]); // Using id instead of the full object
+  }, [activeChannel?.id, markAllMessagesAsRead, resetMessageStates]); // Using id instead of the full object
 
   // scrollToBottom function is now provided by useMessageScroll hook
   
@@ -427,12 +373,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     
     // Update local state
     setUnreadMessages(new Set());
-    setUnreadCount(0);
-    setNewMessagesCount(0);
+    resetUnreadCounts();
     
     // Вызываем функцию из хука, которая прокрутит вниз и отметит сообщения как прочитанные
     handleScrollToBottom();
-  }, [paginationState.loadingMode, paginationState.isJumpingToMessage, handleScrollToBottom, paginationActions]);
+  }, [paginationState.loadingMode, paginationState.isJumpingToMessage, handleScrollToBottom, paginationActions, resetUnreadCounts]);
 
   // Handle around messages
   useEffect(() => {
@@ -445,6 +390,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Устанавливаем новые сообщения (старые уже очищены при клике на результат поиска)
       setMessages(newExtendedMessages);
       messagesLengthRef.current = newExtendedMessages.length;
+      
+      // Запоминаем ID around запроса
+      setLastAroundId(paginationState.aroundMessageId);
       
       // НЕ сбрасываем beforeId и afterId после around загрузки
       // Они будут установлены при скролле пользователя
@@ -459,7 +407,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       if (unreadMessages.length > 0) {
         setUnreadMessages(new Set(unreadMessages.map(msg => msg.id)));
-        setUnreadCount(unreadMessages.length);
+        resetUnreadCounts(); // Reset first
+        updateUnreadCount(unreadMessages.length); // Then set to correct value
       }
       
       
@@ -474,6 +423,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         paginationActions.setHasMoreMessages(true); // Включаем пагинацию вверх
         paginationActions.setHasMoreMessagesAfter(true); // Включаем пагинацию вниз
       }
+      
+      // НЕ сбрасываем isJumpingToMessage здесь - оставляем блокировку до завершения анимации
     }
   }, [aroundMessagesData, paginationState.loadingMode, convertToExtendedMessage, user.id, paginationActions]);
 
@@ -492,6 +443,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     
     // Пропускаем обработку если у нас есть beforeId или afterId (это пагинация)
     if (paginationState.beforeId !== null || paginationState.afterId !== null) return;
+    
+    // Пропускаем если мы только что загрузили данные через around
+    if (lastAroundId !== null && messages.length > 0) return;
     
     // Set empty messages array when data is empty
     if (!messagesData || messagesData.length === 0) {
@@ -531,7 +485,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       if (unreadMessages.length > 0) {
         setUnreadMessages(new Set(unreadMessages.map(msg => msg.id)));
-        setUnreadCount(unreadMessages.length);
+        resetUnreadCounts(); // Reset first
+        updateUnreadCount(unreadMessages.length); // Then set to correct value
       }
       
       // Прокручиваем вниз только при начальной загрузке
@@ -541,7 +496,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         isLoadingMoreRef.current = false; // Разблокируем пагинацию
       }, 150);
     }
-  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationState.beforeId, paginationState.afterId, paginationActions]);
+  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationState.beforeId, paginationState.afterId, paginationActions, lastAroundId, messages.length]);
 
   // Effect to scroll to target message when loaded
   useEffect(() => {
@@ -554,19 +509,34 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         
         // Даем время DOM обновиться
         setTimeout(() => {
+          // Прокручиваем к сообщению
           scrollToMessage(targetMessageId);
           
           // Сбрасываем состояния после прокрутки
           setTargetMessageId(null);
           paginationActions.setAroundMessageId(null);
-          paginationActions.setLoadingMode(null);
           
-          // Разблокируем автопрокрутку и пагинацию через некоторое время
+          // Подготавливаем пагинацию для нормальной работы после around
+          if (messages.length > 0) {
+            // Сбрасываем lastBeforeIdRef и lastAfterIdRef чтобы пагинация могла работать
+            lastBeforeIdRef.current = null;
+            lastAfterIdRef.current = null;
+            
+            // Включаем обе стороны пагинации, чтобы пользователь мог скроллить и вверх, и вниз
+            paginationActions.setHasMoreMessages(true);
+            paginationActions.setHasMoreMessagesAfter(true);
+            paginationActions.setEnableAfterPagination(true);
+          }
+          
+          // Разблокируем автопрокрутку и пагинацию через большую задержку
           setTimeout(() => {
+            // Только теперь сбрасываем режим загрузки и skipMainQuery
+            paginationActions.setLoadingMode(null);
+            paginationActions.setIsJumpingToMessage(false);
+            paginationActions.setSkipMainQuery(false);
             setDisableAutoScroll(false);
             isLoadingMoreRef.current = false; // Разблокируем пагинацию
-            // НЕ сбрасываем skipMainQuery здесь - он сбросится когда установится beforeId или afterId
-          }, 1500); // Увеличиваем задержку для завершения всех анимаций
+          }, 300); // Уменьшенная задержка для быстрой разблокировки пагинации
         }, 200);
       } 
     }
@@ -886,13 +856,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     
     // Clear unread message states
     setUnreadMessages(new Set());
-    setUnreadCount(0);
-    setNewMessagesCount(0);
+    resetUnreadCounts();
     
     // Set target message and navigate
     setTargetMessageId(message.id);
     paginationActions.setAroundMessageId(message.id);
-  }, [clearSearch, paginationActions, setDisableAutoScroll, isLoadingMoreRef, setMessages, setTempMessages, messagesLengthRef, setUnreadMessages, setUnreadCount, setNewMessagesCount, setTargetMessageId]);
+  }, [clearSearch, paginationActions, setDisableAutoScroll, isLoadingMoreRef, setMessages, setTempMessages, messagesLengthRef, setUnreadMessages, resetUnreadCounts, setTargetMessageId]);
 
   // Handle scroll pagination
   useEffect(() => {
@@ -1052,6 +1021,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           isLoadingMoreRef.current = false;
           paginationActions.setLoadingMode(null);
           paginationActions.setAfterId(null);
+          lastAfterIdRef.current = null;
           return;
         }
         
@@ -1111,11 +1081,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       requestAnimationFrame(() => {
         isLoadingMoreRef.current = false;
         paginationActions.setLoadingMode(null);
-        // Don't reset afterId here - it will cause a duplicate request
-        // afterId should only be reset when changing channels or scrolling to bottom
+        // Сбрасываем afterId если достигли конца
+        if (!paginationState.hasMoreMessagesAfter) {
+          paginationActions.setAfterId(null);
+          lastAfterIdRef.current = null;
+        }
       });
     }
-  }, [messagesData, paginationState.afterId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions]);
+  }, [messagesData, paginationState.afterId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions, paginationState.hasMoreMessagesAfter, lastAfterIdRef]);
 
 
   // Messages rendering logic has been moved to the MessageList component
@@ -1185,8 +1158,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         
         // Clear all unread indicators
         setUnreadMessages(new Set());
-        setUnreadCount(0);
-        setNewMessagesCount(0);
+        resetUnreadCounts();
           }
       
       // Set a timeout to determine when scrolling has stopped
@@ -1238,10 +1210,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Add effect to handle scroll to bottom
   useEffect(() => {
-    if (isScrolledToBottom) {
-        setNewMessagesCount(0);
+    if (isScrolledToBottom && newMessagesCount > 0) {
+        resetUnreadCounts();
     }
-  }, [isScrolledToBottom]);
+  }, [isScrolledToBottom, newMessagesCount, resetUnreadCounts]);
 
   // Handle search mode changes
   useEffect(() => {
@@ -1390,313 +1362,71 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         position: 'relative',
       }}
     >
-      {/* Delete Message Modal */}
-      <AppModal
+      {/* Delete Message Dialog */}
+      <DeleteMessageDialog
         open={deleteModalOpen}
+        messageToDelete={messageToDelete}
+        deleteForEveryone={deleteForEveryone}
+        canManageMessages={canManageMessages}
+        messages={messages}
+        userId={user.id}
         onClose={() => {
           setDeleteModalOpen(false);
           setMessageToDelete(null);
           setDeleteForEveryone(false);
         }}
-        title="Удалить сообщение"
-      >
-        <Box sx={{ 
-          p: 2, 
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          {messageToDelete && (() => {
-            const message = messages.find(msg => msg.id === messageToDelete);
-            const isOwnMessage = message && message.author.id === user.id;
-            const showDeleteForEveryoneOption = isOwnMessage || canManageMessages;
-            
-            return (
-              <Box sx={{ mb: 3, width: '100%', maxWidth: 300 }}>
-                {showDeleteForEveryoneOption && (
-                  <Box 
-                    onClick={() => setDeleteForEveryone(!deleteForEveryone)}
-                    sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      p: 1.5,
-                      mb: 1.5,
-                      borderRadius: 2,
-                      cursor: 'pointer',
-                      backgroundColor: deleteForEveryone ? 'rgba(255, 61, 113, 0.1)' : 'rgba(0,0,0,0.15)',
-                      border: `1px solid ${deleteForEveryone ? 'rgba(255, 61, 113, 0.3)' : 'rgba(255,255,255,0.1)'}`,
-                      transition: 'all 0.2s ease',
-                      '&:hover': {
-                        backgroundColor: deleteForEveryone ? 'rgba(255, 61, 113, 0.15)' : 'rgba(0,0,0,0.2)',
-                        transform: 'translateY(-2px)',
-                      }
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                      <Checkbox
-                        checked={deleteForEveryone}
-                        onChange={(e) => setDeleteForEveryone(e.target.checked)}
-                        sx={{ 
-                          color: 'rgba(255,255,255,0.5)',
-                          p: 0.5,
-                          mr: 1,
-                          '&.Mui-checked': {
-                            color: '#FF3D71',
-                          }
-                        }}
-                      />
-                      <Typography sx={{ fontWeight: 500, fontSize: '0.9rem' }}>
-                        Удалить у всех
-                      </Typography>
-                    </Box>
-                    
-                    <Typography variant="body2" sx={{ 
-                      color: 'rgba(255,255,255,0.6)', 
-                      fontStyle: 'italic',
-                      fontSize: '0.75rem',
-                      textAlign: 'center'
-                    }}>
-                      {deleteForEveryone 
-                        ? "Сообщение исчезнет у всех участников чата" 
-                        : "Сообщение останется видимым для других"}
-                    </Typography>
-                  </Box>
-                )}
-                
-                <Typography sx={{ 
-                  color: 'rgba(255,255,255,0.7)',
-                  fontSize: '0.75rem',
-                  textAlign: 'center',
-                  mt: 1
-                }}>
-                  {!showDeleteForEveryoneOption 
-                    ? "Сообщение будет скрыто только для вас" 
-                    : deleteForEveryone 
-                      ? "" 
-                      : "Сообщение будет скрыто только в вашем интерфейсе"}
-                </Typography>
-              </Box>
-            );
-          })()}
-          
-          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setDeleteModalOpen(false);
-                setMessageToDelete(null);
-                setDeleteForEveryone(false);
-              }}
-              sx={{
-                color: 'rgba(255,255,255,0.7)',
-                borderColor: 'rgba(255,255,255,0.2)',
-                borderRadius: 2,
-                px: 3,
-                '&:hover': {
-                  borderColor: 'rgba(255,255,255,0.4)',
-                  backgroundColor: 'rgba(255,255,255,0.05)',
-                },
-              }}
-            >
-              Отмена
-            </Button>
-            <Button
-              variant="contained"
-              onClick={confirmDeleteMessage}
-              sx={{
-                backgroundColor: '#FF3D71',
-                color: '#fff',
-                borderRadius: 2,
-                px: 3,
-                '&:hover': {
-                  backgroundColor: '#FF1744',
-                },
-              }}
-            >
-              Удалить
-            </Button>
-          </Box>
-        </Box>
-      </AppModal>
-      <Box sx={{ 
-        height: 60, 
-        px: 3,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderBottom: '1px solid rgba(255,255,255,0.1)',
-      }}>
-        <Typography variant="h6" sx={{ color: '#fff', fontWeight: 700 }}>
-          {activeChannel?.name || 'Select a channel'}
-        </Typography>
-        
-        <SearchBar
-          searchMode={searchMode}
-          setSearchMode={setSearchMode}
-          searchQuery={searchQuery}
-          searchInputRef={searchInputRef}
-          searchResultsRef={searchResultsRef}
-          showSearchResults={showSearchResults}
-          setShowSearchResults={setShowSearchResults}
-          searchResults={searchResults}
-          isSearching={isSearching}
-          debouncedSearchQuery={debouncedSearchQuery}
-          handleSearchInputChange={handleSearchInputChange}
-          clearSearch={clearSearch}
-          onSearchResultClick={handleSearchResultClick}
-        />
-      </Box>
+        onConfirm={confirmDeleteMessage}
+        onDeleteForEveryoneChange={(value) => setDeleteForEveryone(value)}
+      />
+      <ChatHeader
+        activeChannel={activeChannel}
+        searchMode={searchMode}
+        setSearchMode={setSearchMode}
+        searchQuery={searchQuery}
+        searchInputRef={searchInputRef}
+        searchResultsRef={searchResultsRef}
+        showSearchResults={showSearchResults}
+        setShowSearchResults={setShowSearchResults}
+        searchResults={searchResults}
+        isSearching={isSearching}
+        debouncedSearchQuery={debouncedSearchQuery}
+        handleSearchInputChange={handleSearchInputChange}
+        clearSearch={clearSearch}
+        onSearchResultClick={handleSearchResultClick}
+      />
 
       {isLoading && !paginationState.beforeId ? renderSkeleton() : renderMessages()}
 
-      {/* Scroll to bottom button */}
-      <Fade in={showScrollButton}>
-        <IconButton
-          onClick={handleScrollToBottomWithPagination}
-          sx={{
-            position: 'absolute',
-            bottom: replyingToMessage ? 160 : 100, // Increased bottom margin when reply panel is visible
-            right: 20,
-            backgroundColor: 'rgba(30,30,47,0.95)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            '&:hover': {
-              backgroundColor: 'rgba(40,40,57,0.95)',
-            },
-            zIndex: 1000,
-            transition: 'bottom 0.2s ease-out', // Smooth transition for position change
-          }}
-        >
-          <KeyboardArrowDownIcon sx={{ color: '#fff' }} />
-        </IconButton>
-      </Fade>
+      {/* New messages indicator and scroll button */}
+      <NewMessagesIndicator
+        showScrollButton={showScrollButton}
+        newMessagesCount={newMessagesCount}
+        unreadCount={unreadCount}
+        replyingToMessage={!!replyingToMessage}
+        onScrollToBottom={handleScrollToBottomWithPagination}
+      />
 
-      {/* Removed duplicate unread messages indicator */}
-
-      {/* New messages count indicator */}
-      <Fade in={newMessagesCount > 0 || unreadCount > 0}>
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: replyingToMessage ? 160 : 100, // Increased bottom margin when reply panel is visible
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 1000,
-            transition: 'bottom 0.2s ease-out', // Smooth transition for position change
-          }}
-        >
-          <Paper
-            sx={{
-              backgroundColor: '#FF69B4',
-              color: '#fff',
-              px: 2,
-              py: 1,
-              borderRadius: '20px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(255,105,180,0.2)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              '&:hover': {
-                backgroundColor: '#FF1493',
-              },
-            }}
-            onClick={handleScrollToBottomWithPagination}
-          >
-            <KeyboardArrowDownIcon />
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {(newMessagesCount || unreadCount)} {(newMessagesCount || unreadCount) === 1 ? 'новое сообщение' : 'новых сообщений'}
-            </Typography>
-          </Paper>
-        </Box>
-      </Fade>
-
-      <MessageInput
+      <ChatFooter
         activeChannel={activeChannel}
         canSendMessages={canSendMessages}
         sending={sending}
         replyingToMessage={replyingToMessage}
         onSendMessage={handleSendMessage}
         onReplyCancel={() => setReplyingToMessage(null)}
-        onReplyClick={(messageId) => {
-          // Find and scroll to the original message
-          const messageElement = document.querySelector(`[data-msg-id='${messageId}']`);
-          if (messageElement) {
-            messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
-            // Clear any existing highlight timeout
-            if (highlightTimeoutRef.current) {
-              clearTimeout(highlightTimeoutRef.current);
-              highlightTimeoutRef.current = null;
-            }
-            
-            // Clear existing highlights and focused message
-            setFocusedMessageId(null);
-            setHighlightedMessages(new Set());
-            
-            // Highlight the message
-            setFocusedMessageId(messageId);
-            
-            // Add to highlighted set for visual effect
-            setHighlightedMessages(() => {
-              const newSet = new Set<number>();
-              newSet.add(messageId);
-              return newSet;
-            });
-            
-            // Remove highlight after 3 seconds
-            highlightTimeoutRef.current = setTimeout(() => {
-              setHighlightedMessages(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(messageId);
-                return newSet;
-              });
-              setFocusedMessageId(null);
-              highlightTimeoutRef.current = null;
-            }, 3000);
-          }
-        }}
+        onReplyClick={scrollToMessage}
       />
       
       {/* Portal for message actions */}
-      {hoveredMessage && (
-        <MessageActionsPortal
-          targetElement={hoveredMessage.element}
-          messageId={hoveredMessage.message.id}
-          authorId={hoveredMessage.message.author.id}
-          currentUserId={user.id}
-          onReply={() => {
-            setReplyingToMessage(hoveredMessage.message);
-            setHoveredMessage(null);
-          }}
-          onEdit={() => {
-            setEditingMessageId(hoveredMessage.message.id);
-            setHoveredMessage(null);
-          }}
-          onDelete={() => {
-            handleDeleteMessage(hoveredMessage.message.id);
-            setHoveredMessage(null);
-          }}
-          onClose={() => setHoveredMessage(null)}
-          onPortalMouseEnter={() => {
-            isHoveringPortal.current = true;
-            if (hoverTimeoutRef.current) {
-              clearTimeout(hoverTimeoutRef.current);
-              hoverTimeoutRef.current = null;
-            }
-          }}
-          onPortalMouseLeave={() => {
-            isHoveringPortal.current = false;
-            hoverTimeoutRef.current = setTimeout(() => {
-              setHoveredMessage(null);
-            }, 100);
-          }}
-        />
-      )}
+      <MessageActionsWrapper
+        hoveredMessage={hoveredMessage}
+        userId={user.id}
+        isHoveringPortal={isHoveringPortal}
+        hoverTimeoutRef={hoverTimeoutRef}
+        setHoveredMessage={setHoveredMessage}
+        setReplyingToMessage={setReplyingToMessage}
+        setEditingMessageId={setEditingMessageId}
+        handleDeleteMessage={handleDeleteMessage}
+      />
     </Box>
   );
 };

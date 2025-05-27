@@ -1,15 +1,15 @@
 import React from 'react';
 import { Box, Typography, Fade, Skeleton, IconButton } from '@mui/material';
-import UserAvatar from '../../UserAvatar';
+import UserAvatar from '../../../UserAvatar';
 import ChatMessageItem from './ChatMessageItem';
-import { Channel } from '../../../api/channels';
-import Input from '../../common/Input';
+import { Channel } from '../../../../api/channels';
+import Input from '../../../common/Input';
 import { Formik, Form, Field } from 'formik';
 import * as Yup from 'yup';
 import SendIcon from '@mui/icons-material/Send';
 import CloseIcon from '@mui/icons-material/Close';
-import { ExtendedMessage } from './types/message';
-import { LoadingMode } from './hooks/useMessagePagination';
+import { ExtendedMessage } from '../types/message';
+import { LoadingMode } from '../hooks/useMessagePagination';
 
 // Validation schema for editing messages
 const messageSchema = Yup.object().shape({

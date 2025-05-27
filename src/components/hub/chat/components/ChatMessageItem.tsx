@@ -2,9 +2,9 @@ import React from 'react';
 import { Box, Typography } from '@mui/material';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import ReplyIcon from '@mui/icons-material/Reply';
-import UserAvatar from '../../UserAvatar';
+import UserAvatar from '../../../UserAvatar';
 import DOMPurify from 'dompurify';
-import { ExtendedMessage, MessageStatus } from './types/message';
+import { ExtendedMessage } from '../types/message';
 
 interface ChatMessageItemProps {
   message: ExtendedMessage;

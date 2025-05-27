@@ -1,12 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Box, IconButton, Paper, Stack, Typography, Fade, Tooltip, Button, Checkbox, Skeleton } from '@mui/material';
-import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
-import AttachFileIcon from '@mui/icons-material/AttachFile';
-import SendIcon from '@mui/icons-material/Send';
-import CloseIcon from '@mui/icons-material/Close';
-import ReplyIcon from '@mui/icons-material/Reply';
+import { Box, IconButton, Paper, Typography, Fade, Tooltip, Button, Checkbox, Skeleton } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import SearchIcon from '@mui/icons-material/Search';
+import SendIcon from '@mui/icons-material/Send';
+import CloseIcon from '@mui/icons-material/Close';
 import { Formik, Form, Field } from 'formik';
 import * as Yup from 'yup';
 import { Channel, Message, ChannelType, useGetMessagesQuery, useCreateMessageMutation, useUpdateMessageMutation, useDeleteMessageMutation } from '../../../api/channels';
@@ -18,6 +15,8 @@ import { hasPermission } from '@/utils/rolePermissions';
 import AppModal from '../../AppModal';
 import ChatMessageItem from './ChatMessageItem';
 import MessageActionsPortal from './MessageActionsPortal';
+import MessageInput from './MessageInput';
+import SearchBar from './SearchBar';
 import { useMessagePagination } from './hooks/useMessagePagination';
 import { useMessageReadStatus } from './hooks/useMessageReadStatus';
 import { useMessageScroll } from './hooks/useMessageScroll';
@@ -82,15 +81,17 @@ interface MainChatAreaProps {
   isOwner: boolean;
 }
 
-// Update validation schema to remove the required message
-const messageSchema = Yup.object().shape({
-  content: Yup.string()
-    .min(1, 'Message cannot be empty')
-    .max(2000, 'Message is too long')
-});
+
 
 
 const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId, userPermissions, isOwner }) => {
+  // Schema for editing messages
+  const messageSchema = Yup.object().shape({
+    content: Yup.string()
+      .min(1, 'Message cannot be empty')
+      .max(2000, 'Message is too long')
+  });
+
   const [sending] = useState(false);
   const [messages, setMessages] = useState<ExtendedMessage[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
@@ -134,7 +135,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const [unreadCount, setUnreadCount] = useState(0);
   const [newMessagesCount, setNewMessagesCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const messagesLengthRef = useRef(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -618,15 +618,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Remove old auto-scroll effect - now handled in main message loading effect
 
-  // Add effect to focus input when chat is opened
-  useEffect(() => {
-    if (activeChannel && inputRef.current) {
-      inputRef.current.focus();
-      // Place cursor at the end
-      const length = inputRef.current.value.length;
-      inputRef.current.setSelectionRange(length, length);
-    }
-  }, [activeChannel]);
   
   // Обработчик нажатия Ctrl+F для активации поиска
   useEffect(() => {
@@ -675,21 +666,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     replyingToMessageRef.current = replyingToMessage;
   }, [replyingToMessage]);
 
-  // Focus input helper function
-  const focusMessageInput = useCallback(() => {
-    // Clear any active element focus first
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
-    
-    // Use RAF for better timing with DOM updates
-    requestAnimationFrame(() => {
-      if (inputRef.current) {
-        inputRef.current.focus();
-        inputRef.current.setSelectionRange(0, 0);
-      }
-    });
-  }, []);
 
   const handleSendMessage = useCallback(async (values: { content: string }, { resetForm }: { resetForm: () => void }) => {
     if (!activeChannel || !user) return;
@@ -782,7 +758,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         notify('Ошибка при отправке сообщения', 'error');
       }
     }
-  }, [activeChannel, user, createMessage, focusMessageInput, notify, scrollToBottom]);
+  }, [activeChannel, user, createMessage, notify, scrollToBottom]);
 
   const handleEditMessage = useCallback(async (values: { content: string }, { resetForm }: { resetForm: () => void }) => {
     if (!editingMessageId || !activeChannel) return;
@@ -798,7 +774,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     if (content === originalMessage.content) {
       setEditingMessageId(null);
       resetForm();
-      focusMessageInput();
       return;
     }
 
@@ -817,7 +792,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Закрываем форму редактирования
     setEditingMessageId(null);
     resetForm();
-    focusMessageInput();
     
     try {
       // Отправляем запрос на сервер
@@ -843,7 +817,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Показываем уведомление об ошибке
       notify('Ошибка при обновлении сообщения', 'error');
     }
-  }, [editingMessageId, activeChannel, updateMessage, focusMessageInput, messages, notify]);
+  }, [editingMessageId, activeChannel, updateMessage, messages, notify]);
 
   const handleDeleteMessage = useCallback((messageId: number) => {
     setMessageToDelete(messageId);
@@ -926,6 +900,43 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setMessageToDelete(null);
     setDeleteForEveryone(false);
   }, [activeChannel, deleteMessage, messages, notify, messageToDelete, deleteForEveryone]);
+
+  // Handle search result click
+  const handleSearchResultClick = useCallback((message: Message) => {
+    // Set loading mode around
+    paginationActions.setLoadingMode('around');
+
+    // Block main query
+    paginationActions.setSkipMainQuery(true);
+    
+    // Block all queries
+    paginationActions.setIsJumpingToMessage(true);
+    
+    // Close search panel
+    clearSearch();
+    
+    // Block auto-scroll and pagination
+    setDisableAutoScroll(true);
+    isLoadingMoreRef.current = true; // Block pagination
+    
+    // Clear beforeId to avoid conflicts
+    paginationActions.setBeforeId(null);
+    
+    // Clear messages before loading new ones
+    // This prevents scroll issues due to message removal
+    setMessages([]);
+    setTempMessages(new Map());
+    messagesLengthRef.current = 0;
+    
+    // Clear unread message states
+    setUnreadMessages(new Set());
+    setUnreadCount(0);
+    setNewMessagesCount(0);
+    
+    // Set target message and navigate
+    setTargetMessageId(message.id);
+    paginationActions.setAroundMessageId(message.id);
+  }, [clearSearch, paginationActions, setDisableAutoScroll, isLoadingMoreRef, setMessages, setTempMessages, messagesLengthRef, setUnreadMessages, setUnreadCount, setNewMessagesCount, setTargetMessageId]);
 
   // Handle scroll pagination
   useEffect(() => {
@@ -1849,7 +1860,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
                   hubId={hubId}
                   onReply={(message) => {
                     setReplyingToMessage(message);
-                    focusMessageInput();
                   }}
                   onEdit={(messageId) => setEditingMessageId(messageId)}
                   onDelete={(messageId) => handleDeleteMessage(messageId)}
@@ -2121,7 +2131,21 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           {activeChannel?.name || 'Select a channel'}
         </Typography>
         
-        {searchMode ? (
+        <SearchBar
+          searchMode={searchMode}
+          setSearchMode={setSearchMode}
+          searchQuery={searchQuery}
+          searchInputRef={searchInputRef}
+          searchResultsRef={searchResultsRef}
+          showSearchResults={showSearchResults}
+          setShowSearchResults={setShowSearchResults}
+          searchResults={searchResults}
+          isSearching={isSearching}
+          debouncedSearchQuery={debouncedSearchQuery}
+          handleSearchInputChange={handleSearchInputChange}
+          clearSearch={clearSearch}
+          onSearchResultClick={handleSearchResultClick}
+        />
           <Box sx={{ 
             display: 'flex', 
             flexDirection: 'column',
@@ -2456,7 +2480,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
               <SearchIcon />
             </IconButton>
           </Tooltip>
-        )}
+        )
       </Box>
 
       {isLoading && !paginationState.beforeId ? renderSkeleton() : renderMessages()}
@@ -2524,223 +2548,52 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         </Box>
       </Fade>
 
-      <Box sx={{ p: 2 }}>
-        {canSendMessages ? (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {replyingToMessage && (
-              <Paper
-                sx={{
-                  p: '8px 16px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 1,
-                  background: 'rgba(30,30,47,0.95)',
-                  border: '1px solid rgba(149,128,255,0.25)',
-                  borderRadius: 2,
-                  position: 'relative',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                  mb: 1,
-                  pl: 3,
-                  width: '100%'
-                }}
-              >
-                <Box 
-                  sx={{ 
-                    position: 'absolute', 
-                    left: 0, 
-                    top: 0, 
-                    bottom: 0, 
-                    width: '4px', 
-                    backgroundColor: '#00CFFF',
-                    borderTopLeftRadius: 2,
-                    borderBottomLeftRadius: 2
-                  }}
-                />
-                <Box 
-                  sx={{ flex: 1, cursor: 'pointer' }}
-                  onClick={() => {
-                    // Find and scroll to the original message
-                    if (replyingToMessage && replyingToMessage.id) {
-                      const messageElement = document.querySelector(`[data-msg-id='${replyingToMessage.id}']`);
-                      if (messageElement) {
-                        messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        
-                        // Clear any existing highlight timeout
-                        if (highlightTimeoutRef.current) {
-                          clearTimeout(highlightTimeoutRef.current);
-                          highlightTimeoutRef.current = null;
-                        }
-                        
-                        // Clear existing highlights and focused message
-                        setFocusedMessageId(null);
-                        setHighlightedMessages(new Set());
-                        
-                        // Highlight the message
-                        setFocusedMessageId(replyingToMessage.id);
-                        
-                        // Add to highlighted set for visual effect
-                        setHighlightedMessages(() => {
-                          const newSet = new Set<number>();
-                          newSet.add(replyingToMessage.id);
-                          return newSet;
-                        });
-                        
-                        // Remove highlight after 3 seconds
-                        highlightTimeoutRef.current = setTimeout(() => {
-                          setHighlightedMessages(prev => {
-                            const newSet = new Set(prev);
-                            newSet.delete(replyingToMessage.id);
-                            return newSet;
-                          });
-                          setFocusedMessageId(null);
-                          highlightTimeoutRef.current = null;
-                        }, 3000);
-                      }
-                    }
-                  }}
-                >
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                    <ReplyIcon sx={{ color: '#00CFFF', fontSize: '0.9rem' }} />
-                    <Typography sx={{ color: '#00CFFF', fontWeight: 600, fontSize: '0.9rem' }}>
-                      {replyingToMessage.author.login}
-                    </Typography>
-                  </Box>
-                  <Typography 
-                    sx={{ 
-                      color: 'rgba(255,255,255,0.7)', 
-                      fontSize: '0.85rem',
-                      maxWidth: '500px', // Fixed maximum width
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      maxHeight: '1.5em'
-                    }}
-                  >
-                    {(() => {
-                      // Handle extremely long messages with no spaces
-                      const content = replyingToMessage.content;
-                      // First check if content is too long
-                      if (content.length > 150) {
-                        // Check if it's a long string with no spaces (which causes layout issues)
-                        const hasSpaces = content.indexOf(' ') !== -1;
-                        if (!hasSpaces && content.length > 100) {
-                          // For long strings with no spaces, be more aggressive with truncation
-                          return content.substring(0, 100) + '...';
-                        } else {
-                          // Normal truncation for text with spaces
-                          return content.substring(0, 150) + '...';
-                        }
-                      }
-                      return content;
-                    })()}
-                  </Typography>
-                </Box>
-                <IconButton 
-                  size="small" 
-                  onClick={() => setReplyingToMessage(null)}
-                  sx={{ 
-                    color: 'rgba(255,255,255,0.5)',
-                    '&:hover': { color: 'rgba(255,255,255,0.8)' }
-                  }}
-                >
-                  <CloseIcon fontSize="small" />
-                </IconButton>
-              </Paper>
-            )}
-            <Paper
-              sx={{
-                p: '8px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 3,
-              }}
-            >
-            <Formik
-              initialValues={{ content: '' }}
-              validationSchema={messageSchema}
-              onSubmit={handleSendMessage}
-            >
-              {({ handleSubmit, values }) => (
-                <>
-                  <Form style={{ width: '100%' }}>
-                    <Field
-                      name="content"
-                      component={Input}
-                      placeholder="Type a message..."
-                      multiline
-                      maxRows={4}
-                      size="small"
-                      disabled={!activeChannel || sending}
-                      inputRef={inputRef}
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                            borderColor: 'transparent',
-                          },
-                          '&:hover .MuiOutlinedInput-notchedOutline': {
-                            borderColor: 'transparent',
-                          },
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: 'transparent',
-                          },
-                        },
-                      }}
-                      onKeyDown={(e: React.KeyboardEvent) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSubmit();
-                        }
-                      }}
-                    />
-                  </Form>
-                  <Stack direction="row" spacing={1}>
-                    <IconButton size="small" sx={{ color: '#FF69B4' }}>
-                      <EmojiEmotionsIcon />
-                    </IconButton>
-                    <IconButton size="small" sx={{ color: '#1E90FF' }}>
-                      <AttachFileIcon />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      sx={{
-                        color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
-                        transition: 'color 0.25s cubic-bezier(.4,0,.2,1)',
-                        '&:hover': {
-                          color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
-                        }
-                      }}
-                      onClick={() => handleSubmit()}
-                      disabled={sending || !values.content}
-                    >
-                      <SendIcon />
-                    </IconButton>
-                  </Stack>
-                </>
-              )}
-            </Formik>
-          </Paper>
-          </Box>
-        ) : (
-          <Paper
-            sx={{
-              p: '12px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 3,
-            }}
-          >
-            <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.9rem' }}>
-              Недостаточно прав для отправки сообщений
-            </Typography>
-          </Paper>
-        )}
-      </Box>
+      <MessageInput
+        activeChannel={activeChannel}
+        canSendMessages={canSendMessages}
+        sending={sending}
+        replyingToMessage={replyingToMessage}
+        onSendMessage={handleSendMessage}
+        onReplyCancel={() => setReplyingToMessage(null)}
+        onReplyClick={(messageId) => {
+          // Find and scroll to the original message
+          const messageElement = document.querySelector(`[data-msg-id='${messageId}']`);
+          if (messageElement) {
+            messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Clear any existing highlight timeout
+            if (highlightTimeoutRef.current) {
+              clearTimeout(highlightTimeoutRef.current);
+              highlightTimeoutRef.current = null;
+            }
+            
+            // Clear existing highlights and focused message
+            setFocusedMessageId(null);
+            setHighlightedMessages(new Set());
+            
+            // Highlight the message
+            setFocusedMessageId(messageId);
+            
+            // Add to highlighted set for visual effect
+            setHighlightedMessages(() => {
+              const newSet = new Set<number>();
+              newSet.add(messageId);
+              return newSet;
+            });
+            
+            // Remove highlight after 3 seconds
+            highlightTimeoutRef.current = setTimeout(() => {
+              setHighlightedMessages(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(messageId);
+                return newSet;
+              });
+              setFocusedMessageId(null);
+              highlightTimeoutRef.current = null;
+            }, 3000);
+          }
+        }}
+      />
       
       {/* Portal for message actions */}
       {hoveredMessage && (
@@ -2751,7 +2604,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           currentUserId={user.id}
           onReply={() => {
             setReplyingToMessage(hoveredMessage.message);
-            focusMessageInput();
             setHoveredMessage(null);
           }}
           onEdit={() => {

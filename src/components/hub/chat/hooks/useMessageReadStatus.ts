@@ -14,8 +14,7 @@ interface UseMessageReadStatusReturn {
 }
 
 export const useMessageReadStatus = ({
-  activeChannel,
-  user
+  activeChannel
 }: UseMessageReadStatusProps): UseMessageReadStatusReturn => {
   const unreadMessagesBufferRef = useRef<Set<number>>(new Set());
 

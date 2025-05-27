@@ -4,32 +4,7 @@ import DoneAllIcon from '@mui/icons-material/DoneAll';
 import ReplyIcon from '@mui/icons-material/Reply';
 import UserAvatar from '../../UserAvatar';
 import DOMPurify from 'dompurify';
-
-enum MessageStatus {
-  SENT = 0,
-  READ = 1,
-  NEW = 2
-}
-
-interface Message {
-  id: number;
-  content: string;
-  author: {
-    id: number;
-    login: string;
-    avatar: string | null;
-  };
-  created_at: string;
-  last_modified_at?: string;
-  attachments: any[];
-  read_by_count?: number;
-  reply?: Message;
-}
-
-interface ExtendedMessage extends Message {
-  status: MessageStatus;
-  channel_id?: number;
-}
+import { ExtendedMessage, MessageStatus } from './types/message';
 
 interface ChatMessageItemProps {
   message: ExtendedMessage;
@@ -70,9 +45,6 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
   searchQuery,
   currentUserId,
   hubId,
-  onReply,
-  onEdit,
-  onDelete,
   onReplyClick,
   onMouseEnter,
   onMouseLeave,

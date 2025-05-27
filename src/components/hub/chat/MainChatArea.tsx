@@ -1,96 +1,44 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Box, IconButton, Paper, Typography, Fade, Tooltip, Button, Checkbox, Skeleton } from '@mui/material';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Box, Typography, Fade, IconButton, Button, Paper, Skeleton, Checkbox } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import SearchIcon from '@mui/icons-material/Search';
-import SendIcon from '@mui/icons-material/Send';
-import CloseIcon from '@mui/icons-material/Close';
-import { Formik, Form, Field } from 'formik';
-import * as Yup from 'yup';
-import { Channel, Message, ChannelType, useGetMessagesQuery, useCreateMessageMutation, useUpdateMessageMutation, useDeleteMessageMutation } from '../../../api/channels';
-import UserAvatar from '../../UserAvatar';
-import Input from '../../common/Input';
-import DOMPurify from 'dompurify';
+import SearchBar from './SearchBar';
+import MessageInput from './MessageInput';
+import MessageList from './MessageList';
 import { useNotification } from '@/context/NotificationContext';
 import { hasPermission } from '@/utils/rolePermissions';
 import AppModal from '../../AppModal';
-import ChatMessageItem from './ChatMessageItem';
 import MessageActionsPortal from './MessageActionsPortal';
-import MessageInput from './MessageInput';
-import SearchBar from './SearchBar';
+import { 
+  useGetMessagesQuery, 
+  useCreateMessageMutation, 
+  useUpdateMessageMutation, 
+  useDeleteMessageMutation,
+  Channel,
+  Message,
+  ChannelType 
+} from '../../../api/channels';
 import { useMessagePagination } from './hooks/useMessagePagination';
 import { useMessageReadStatus } from './hooks/useMessageReadStatus';
 import { useMessageScroll } from './hooks/useMessageScroll';
 import { useMessageSearch } from './hooks/useMessageSearch';
 import { useMessageWebSocket } from './hooks/useMessageWebSocket';
+import { ExtendedMessage, MessageStatus } from './types/message';
 
-enum MessageStatus {
-  SENT = 0,
-  READ = 1,
-  NEW = 2
-}
-
-interface ExtendedMessage extends Message {
-  status: MessageStatus;
-  channel_id?: number; // Добавляем channel_id для проверки канала
-  // reply field is already inherited from Message interface
-}
-
-const formatMessageTime = (timestamp: string) => {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString([], { 
-    hour: '2-digit', 
-    minute: '2-digit',
-    hour12: false 
-  });
-};
-
-const formatDateForGroup = (timestamp: string) => {
-  const date = new Date(timestamp);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (date.toDateString() === today.toDateString()) {
-    return 'Today';
-  }
-  if (date.toDateString() === yesterday.toDateString()) {
-    return 'Yesterday';
-  }
-  
-  const isCurrentYear = date.getFullYear() === today.getFullYear();
-  return date.toLocaleDateString([], {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    ...(isCurrentYear ? {} : { year: 'numeric' })
-  });
-};
-
-const isWithinTimeThreshold = (timestamp1: string, timestamp2: string, thresholdMinutes: number = 30) => {
-  const date1 = new Date(timestamp1);
-  const date2 = new Date(timestamp2);
-  const diffInMinutes = Math.abs(date1.getTime() - date2.getTime()) / (1000 * 60);
-  return diffInMinutes <= thresholdMinutes;
-};
+// These utility functions have been moved to the MessageList component
 
 interface MainChatAreaProps {
   activeChannel: Channel | null;
-  user: { id: number; login: string; avatar: string | null };
+  user: {
+    id: number;
+    login: string;
+    avatar: string | null;
+  };
   hubId: number;
   userPermissions: string[];
   isOwner: boolean;
 }
 
-
-
-
 const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId, userPermissions, isOwner }) => {
-  // Schema for editing messages
-  const messageSchema = Yup.object().shape({
-    content: Yup.string()
-      .min(1, 'Message cannot be empty')
-      .max(2000, 'Message is too long')
-  });
 
   const [sending] = useState(false);
   const [messages, setMessages] = useState<ExtendedMessage[]>([]);
@@ -101,10 +49,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const { state: paginationState, actions: paginationActions, isLoadingMoreRef, lastBeforeIdRef, lastAfterIdRef } = useMessagePagination();
   
   // Refs должны быть объявлены до использования в хуках
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   
   // Использование хука для работы с прочитанными сообщениями
-  const { markAllMessagesAsRead, addToReadBuffer, unreadMessagesBufferRef } = useMessageReadStatus({
+  const { markMessageAsRead, markAllMessagesAsRead, addToReadBuffer, unreadMessagesBufferRef } = useMessageReadStatus({
     activeChannel,
     user
   });
@@ -132,11 +80,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   });
   const [tempMessages, setTempMessages] = useState<Map<string, ExtendedMessage>>(new Map());
   const [unreadMessages, setUnreadMessages] = useState<Set<number>>(new Set());
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [newMessagesCount, setNewMessagesCount] = useState(0);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const editInputRef = useRef<HTMLInputElement | null>(null);
-  const messagesLengthRef = useRef(0);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [newMessagesCount, setNewMessagesCount] = useState<number>(0);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
+  const messagesLengthRef = useRef<number>(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState<number | null>(null);
   const [deleteForEveryone, setDeleteForEveryone] = useState(false);
@@ -276,12 +224,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }, []),
       
       onMarkMessageAsRead: useCallback((messageId: number) => {
+        // Update message status visually
         setMessages(prev => prev.map(msg => 
           msg.id === messageId && msg.author.id !== user.id
             ? { ...msg, status: MessageStatus.READ }
             : msg
         ));
         
+        // Update unread counters
         setUnreadMessages(prev => {
           const newSet = new Set(prev);
           newSet.delete(messageId);
@@ -289,7 +239,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         });
         setUnreadCount(prev => Math.max(0, prev - 1));
         setNewMessagesCount(prev => Math.max(0, prev - 1));
-      }, [user.id]),
+        
+        // Mark message as read using the hook's function
+        markMessageAsRead(messageId);
+      }, [user.id, markMessageAsRead]),
       
       onNewMessageIndicator: useCallback(() => {
         // This was for setHasNewMessage which we removed
@@ -312,7 +265,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         setUnreadMessages(new Set());
         setUnreadCount(0);
         setNewMessagesCount(0);
-      }, [user.id]),
+        
+        // Mark all messages as read using the hook's function
+        markAllMessagesAsRead();
+      }, [user.id, markAllMessagesAsRead]),
       
       onUnreadCountChange: useCallback((change: number) => {
         setUnreadCount(prev => Math.max(0, prev + change));
@@ -1162,11 +1118,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   }, [messagesData, paginationState.afterId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions]);
 
 
-  // Sort messages for display in the chat
-  const sortedMessages = useMemo(() => {
-    return [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  }, [messages]);
-  
+  // Messages rendering logic has been moved to the MessageList component
 
   // Add effect to track scroll position
   useEffect(() => {
@@ -1385,594 +1337,44 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     </Box>
   );
 
+  // Define a component to render message list
   const renderMessages = () => (
-    <Box 
-      ref={messagesContainerRef}
-      className="messages-container"
-      sx={{ 
-        flex: 1, 
-        p: 3, 
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
-        position: 'relative',
-        '&::-webkit-scrollbar': {
-          width: '8px',
-        },
-        '&::-webkit-scrollbar-track': {
-          background: 'rgba(255,255,255,0.05)',
-          borderRadius: '4px',
-        },
-        '&::-webkit-scrollbar-thumb': {
-          background: 'rgba(255,255,255,0.1)',
-          borderRadius: '4px',
-          '&:hover': {
-            background: 'rgba(255,255,255,0.15)',
-          },
-        },
-      }}
-    >
-      {sortedMessages.length === 0 && tempMessages.size === 0 ? (
-        <Box sx={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          alignItems: 'center', 
-          justifyContent: 'center',
-          height: '100%',
-          color: 'rgba(255,255,255,0.5)',
-          textAlign: 'center',
-          gap: 2
-        }}>
-          {/* Show loading state when in around loading mode or when jumping to message */}
-          {(paginationState.loadingMode === 'around' || paginationState.isJumpingToMessage || isLoadingAround) ? (
-            <Box sx={{ 
-              width: '100%',
-              height: '100%',
-              overflowY: 'auto',
-              p: 3, 
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-            }}>
-              {[...Array(MESSAGES_PER_PAGE)].map((_, index) => (
-                <Box key={index} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-                  <Skeleton variant="circular" width={40} height={40} sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
-                  <Box sx={{ flex: 1 }}>
-                    <Skeleton variant="text" width={120} height={24} sx={{ bgcolor: 'rgba(255,255,255,0.1)', mb: 1 }} />
-                    <Skeleton variant="text" width="80%" height={20} sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
-                    <Skeleton variant="text" width="60%" height={20} sx={{ bgcolor: 'rgba(255,255,255,0.1)' }} />
-                  </Box>
-                </Box>
-              ))}
-            </Box>
-          ) : searchMode && searchQuery.trim() ? (
-            <>
-              <Typography variant="h6">
-                Нет результатов поиска
-              </Typography>
-              <Typography variant="body2">
-                Попробуйте изменить поисковый запрос
-              </Typography>
-            </>
-          ) : (
-            <>
-              <Typography variant="h6">
-                Нет сообщений
-              </Typography>
-              <Typography variant="body2">
-                Начните общение, отправив первое сообщение
-              </Typography>
-            </>
-          )}
-        </Box>
-      ) : (
-        <>
-          {/* Floating date label */}
-          <Fade in={showDateLabel} timeout={{ enter: 300, exit: 500 }}>
-            <Box
-              sx={{
-                position: 'sticky',
-                top: 0,
-                zIndex: 10,
-                alignSelf: 'center',
-                backgroundColor: 'rgba(30,30,47,0.85)',
-                backdropFilter: 'blur(8px)',
-                borderRadius: '16px',
-                px: 2,
-                py: 0.75,
-                mb: 1,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                transition: 'all 0.3s ease',
-              }}
-            >
-              <Typography
-                sx={{
-                  color: 'rgba(255,255,255,0.9)',
-                  fontWeight: 600,
-                  fontSize: '0.9rem',
-                }}
-              >
-                {currentDateLabel}
-              </Typography>
-            </Box>
-          </Fade>
-
-          {/* Loading indicator for upward pagination */}
-          {paginationState.loadingMode === 'pagination' && paginationState.beforeId && (
-            <Box sx={{ 
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              py: 2,
-              gap: 1
-            }}>
-              <Box
-                sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  backgroundColor: '#00CFFF',
-                  animation: 'pulse 1.4s infinite ease-in-out both',
-                  animationDelay: '-0.32s',
-                  '@keyframes pulse': {
-                    '0%, 80%, 100%': {
-                      transform: 'scale(0)',
-                      opacity: 0.5
-                    },
-                    '40%': {
-                      transform: 'scale(1)',
-                      opacity: 1
-                    }
-                  }
-                }}
-              />
-              <Box
-                sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  backgroundColor: '#00CFFF',
-                  animation: 'pulse 1.4s infinite ease-in-out both',
-                  animationDelay: '-0.16s',
-                  '@keyframes pulse': {
-                    '0%, 80%, 100%': {
-                      transform: 'scale(0)',
-                      opacity: 0.5
-                    },
-                    '40%': {
-                      transform: 'scale(1)',
-                      opacity: 1
-                    }
-                  }
-                }}
-              />
-              <Box
-                sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  backgroundColor: '#00CFFF',
-                  animation: 'pulse 1.4s infinite ease-in-out both',
-                  '@keyframes pulse': {
-                    '0%, 80%, 100%': {
-                      transform: 'scale(0)',
-                      opacity: 0.5
-                    },
-                    '40%': {
-                      transform: 'scale(1)',
-                      opacity: 1
-                    }
-                  }
-                }}
-              />
-            </Box>
-          )}
-
-          {/* Messages */}
-          {(() => {
-            let result: React.ReactElement[] = [];
-            let prevAuthorId: number | null = null;
-            let prevMessageTime: string | null = null;
-            let currentGroup: React.ReactElement[] = [];
-            let currentDateString: string | null = null;
-            let processedDates = new Set<string>();
-            
-            // Handle reply click callback
-            const handleReplyClick = (replyId: number) => {
-              // Check if message exists in current list
-              const messageExists = sortedMessages.some(msg => msg.id === replyId);
-              
-              if (messageExists) {
-                // Message is in current view, just scroll to it
-                const messageElement = document.querySelector(`[data-msg-id='${replyId}']`);
-                if (messageElement) {
-                  messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  
-                  // Clear any existing highlight timeout
-                  if (highlightTimeoutRef.current) {
-                    clearTimeout(highlightTimeoutRef.current);
-                    highlightTimeoutRef.current = null;
-                  }
-                  
-                  // Clear existing highlights and focused message
-                  setFocusedMessageId(null);
-                  setHighlightedMessages(new Set());
-                  
-                  // Highlight the new message
-                  setFocusedMessageId(replyId);
-                  
-                  // Add to highlighted set for visual effect
-                  setHighlightedMessages(() => {
-                    const newSet = new Set<number>();
-                    newSet.add(replyId);
-                    return newSet;
-                  });
-                  
-                  // Remove highlight after 1.5 seconds
-                  highlightTimeoutRef.current = setTimeout(() => {
-                    setHighlightedMessages(prev => {
-                      const newSet = new Set(prev);
-                      newSet.delete(replyId);
-                      return newSet;
-                    });
-                    setFocusedMessageId(null);
-                    highlightTimeoutRef.current = null;
-                  }, 1500);
-                }
-              } else {
-                // Message not in current view, load around it
-                // Блокируем все операции во время перехода
-                paginationActions.setIsJumpingToMessage(true);
-                paginationActions.setSkipMainQuery(true);
-                isLoadingMoreRef.current = true;
-                
-                // Очищаем предыдущие состояния
-                setMessages([]);
-                setTempMessages(new Map());
-                paginationActions.setBeforeId(null);
-                paginationActions.setAfterId(null);
-                lastBeforeIdRef.current = null;
-                lastAfterIdRef.current = null;
-                paginationActions.setHasMoreMessages(true);
-                paginationActions.setHasMoreMessagesAfter(true);
-                paginationActions.setEnableAfterPagination(true);
-                
-                // Устанавливаем целевое сообщение и режим загрузки
-                setTargetMessageId(replyId);
-                paginationActions.setAroundMessageId(replyId);
-                paginationActions.setLoadingMode('around');
-                
-                // После загрузки around эффект автоматически прокрутит к сообщению
-              }
-            };
-            
-            // Combine real and temporary messages
-            const allMessages = [...sortedMessages, ...Array.from(tempMessages.values())];
-            
-            allMessages.forEach((msg) => {
-              const messageDate = new Date(msg.created_at);
-              const messageDateString = messageDate.toDateString();
-              
-              // Check if this is a new date
-              const isNewDate = currentDateString !== messageDateString;
-              if (isNewDate && !processedDates.has(messageDateString)) {
-                // Add date separator for new date groups
-                if (currentGroup.length > 0) {
-                  result.push(...currentGroup);
-                  currentGroup = [];
-                }
-                
-                result.push(
-                  <Box
-                    key={`date-${messageDateString}`}
-                    className="date-separator"
-                    data-date={msg.created_at}
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      my: 2,
-                      position: 'relative',
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        backgroundColor: 'rgba(30,30,47,0.85)',
-                        backdropFilter: 'blur(8px)',
-                        borderRadius: '16px',
-                        px: 2,
-                        py: 0.75,
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        zIndex: 2,
-                      }}
-                    >
-                      <Typography
-                        sx={{
-                          color: 'rgba(255,255,255,0.9)',
-                          fontWeight: 600,
-                          fontSize: '0.9rem',
-                        }}
-                      >
-                        {formatDateForGroup(msg.created_at)}
-                      </Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        position: 'absolute',
-                        height: '1px',
-                        width: '100%',
-                        backgroundColor: 'rgba(255,255,255,0.08)',
-                        zIndex: 1,
-                      }}
-                    />
-                  </Box>
-                );
-                
-                currentDateString = messageDateString;
-                processedDates.add(messageDateString);
-              }
-              
-              const isFirstOfGroup = prevAuthorId !== msg.author.id || 
-                (prevMessageTime !== null && !isWithinTimeThreshold(prevMessageTime, msg.created_at));
-
-              const isTempMessage = msg.id === -1;
-
-              const messageElement = editingMessageId === msg.id ? (
-                <Box
-                  key={isTempMessage ? `temp-${msg.created_at}` : msg.id}
-                  id={`message-${msg.id}`}
-                  className="message-item"
-                  data-date={msg.created_at}
-                  data-msg-id={msg.id.toString()}
-                  sx={{
-                    display: 'flex',
-                    gap: 2,
-                    alignItems: 'flex-start',
-                    position: 'relative',
-                    borderRadius: '10px',
-                    transition: 'background-color 0.3s ease',
-                    opacity: isTempMessage ? 0.6 : 1,
-                  }}
-                >
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      alignItems: 'center', 
-                      justifyContent: 'flex-start', 
-                      width: 40,
-                      ml: 1,
-                      mt: 1,
-                    }}
-                  >
-                    {isFirstOfGroup ? (
-                      <div
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <UserAvatar 
-                          src={msg.author.avatar || undefined} 
-                          alt={msg.author.login} 
-                          userId={msg.author.id}
-                          hubId={hubId}
-                        />
-                      </div>
-                    ) : null}
-                  </Box>
-                  <Box sx={{ flex: 1, position: 'relative' }}>
-                    <Box sx={{ maxWidth: '100%' }}>
-                      <Box sx={{ py: '5px', px: '0px', pl: 0 }}>
-                        {isFirstOfGroup && (
-                          <Typography sx={{ color: '#00CFFF', fontWeight: 700, mb: 0.5, fontSize: '1rem', letterSpacing: 0.2 }}>
-                            {msg.author.login}
-                          </Typography>
-                        )}
-                        <Formik
-                          initialValues={{ content: msg.content }}
-                          validationSchema={messageSchema}
-                          onSubmit={handleEditMessage}
-                        >
-                          {({ handleSubmit, values }) => (
-                            <Form>
-                              <Box sx={{ 
-                                display: 'flex', 
-                                flexDirection: 'column', 
-                                gap: 1,
-                                background: 'rgba(30,30,47,0.9)',
-                                borderRadius: '8px',
-                                padding: '8px',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                              }}>
-                                <Field
-                                  name="content"
-                                  component={Input}
-                                  multiline
-                                  fullWidth
-                                  size="small"
-                                  inputRef={editInputRef}
-                                  onKeyDown={(e: React.KeyboardEvent) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                      e.preventDefault();
-                                      handleSubmit();
-                                    } else if (e.key === 'Escape') {
-                                      e.preventDefault();
-                                      setEditingMessageId(null);
-                                    }
-                                  }}
-                                />
-                                <Box sx={{ 
-                                  display: 'flex', 
-                                  gap: 1, 
-                                  justifyContent: 'flex-end',
-                                  padding: '4px 8px',
-                                }}>
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(e: React.FormEvent) => {
-                                      e.preventDefault();
-                                      setEditingMessageId(null);
-                                    }}
-                                    sx={{ 
-                                      color: '#d32f2f',
-                                      '&:hover': { background: 'rgba(211,47,47,0.1)' }
-                                    }}
-                                  >
-                                    <CloseIcon fontSize="small" />
-                                  </IconButton>
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(_e: React.FormEvent) => handleSubmit()}
-                                    disabled={!values.content}
-                                    sx={{ 
-                                      color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
-                                      transition: 'color 0.25s cubic-bezier(.4,0,.2,1)',
-                                      '&:hover': {
-                                        color: values.content ? '#1976D2' : 'rgba(255,255,255,0.3)',
-                                      }
-                                    }}
-                                  >
-                                    <SendIcon fontSize="small" />
-                                  </IconButton>
-                                </Box>
-                              </Box>
-                            </Form>
-                          )}
-                        </Formik>
-                      </Box>
-                    </Box>
-                  </Box>
-                </Box>
-              ) : (
-                <ChatMessageItem
-                  key={isTempMessage ? `temp-${msg.created_at}` : msg.id}
-                  message={msg}
-                  isFirstOfGroup={isFirstOfGroup}
-                  isTempMessage={isTempMessage}
-                  isHighlighted={highlightedMessages.has(msg.id)}
-                  isUnread={unreadMessages.has(msg.id)}
-                  isFocused={focusedMessageId === msg.id}
-                  isSearchMode={searchMode}
-                  searchQuery={searchQuery}
-                  currentUserId={user.id}
-                  hubId={hubId}
-                  onReply={(message) => {
-                    setReplyingToMessage(message);
-                  }}
-                  onEdit={(messageId) => setEditingMessageId(messageId)}
-                  onDelete={(messageId) => handleDeleteMessage(messageId)}
-                  onReplyClick={handleReplyClick}
-                  onMouseEnter={(e, message) => {
-                    // Отменяем таймер скрытия если он есть
-                    if (hoverTimeoutRef.current) {
-                      clearTimeout(hoverTimeoutRef.current);
-                      hoverTimeoutRef.current = null;
-                    }
-                    setHoveredMessage({ element: e.currentTarget, message });
-                  }}
-                  onMouseLeave={() => {
-                    // Добавляем задержку перед скрытием
-                    hoverTimeoutRef.current = setTimeout(() => {
-                      if (!isHoveringPortal.current) {
-                        setHoveredMessage(null);
-                      }
-                    }, 100);
-                  }}
-                />
-              );
-
-              currentGroup.push(messageElement);
-              prevAuthorId = msg.author.id;
-              prevMessageTime = msg.created_at;
-            });
-
-            if (currentGroup.length > 0) {
-              result.push(...currentGroup);
-            }
-            
-            // Add loading indicator for downward pagination
-            if (paginationState.loadingMode === 'pagination' && paginationState.afterId) {
-              result.push(
-                <Box key="loading-after" sx={{ 
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  py: 2,
-                  gap: 1
-                }}>
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: '#00CFFF',
-                      animation: 'pulse 1.4s infinite ease-in-out both',
-                      animationDelay: '-0.32s',
-                      '@keyframes pulse': {
-                        '0%, 80%, 100%': {
-                          transform: 'scale(0)',
-                          opacity: 0.5
-                        },
-                        '40%': {
-                          transform: 'scale(1)',
-                          opacity: 1
-                        }
-                      }
-                    }}
-                  />
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: '#00CFFF',
-                      animation: 'pulse 1.4s infinite ease-in-out both',
-                      animationDelay: '-0.16s',
-                      '@keyframes pulse': {
-                        '0%, 80%, 100%': {
-                          transform: 'scale(0)',
-                          opacity: 0.5
-                        },
-                        '40%': {
-                          transform: 'scale(1)',
-                          opacity: 1
-                        }
-                      }
-                    }}
-                  />
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: '#00CFFF',
-                      animation: 'pulse 1.4s infinite ease-in-out both',
-                      '@keyframes pulse': {
-                        '0%, 80%, 100%': {
-                          transform: 'scale(0)',
-                          opacity: 0.5
-                        },
-                        '40%': {
-                          transform: 'scale(1)',
-                          opacity: 1
-                        }
-                      }
-                    }}
-                  />
-                </Box>
-              );
-            }
-
-            return result;
-          })()}
-          
-          {/* For properly tracking the end of messages for scrolling */}
-          <div ref={messagesEndRef} />
-        </>
-      )}
-    </Box>
+    <MessageList
+      activeChannel={activeChannel}
+      messages={messages}
+      tempMessages={tempMessages}
+      searchMode={searchMode}
+      searchQuery={searchQuery}
+      highlightedMessages={highlightedMessages}
+      focusedMessageId={focusedMessageId}
+      unreadMessages={unreadMessages}
+      isLoadingMore={isLoadingMoreRef.current}
+      isLoadingAround={isLoadingAround}
+      editingMessageId={editingMessageId}
+      user={user}
+      hubId={hubId}
+      paginationState={paginationState}
+      messagesPerPage={MESSAGES_PER_PAGE}
+      showDateLabel={showDateLabel}
+      currentDateLabel={currentDateLabel}
+      messagesContainerRef={messagesContainerRef}
+      messagesEndRef={messagesEndRef}
+      editInputRef={editInputRef}
+      highlightTimeoutRef={highlightTimeoutRef}
+      hoverTimeoutRef={hoverTimeoutRef}
+      isHoveringPortal={isHoveringPortal}
+      setHighlightedMessages={setHighlightedMessages}
+      setFocusedMessageId={setFocusedMessageId}
+      setEditingMessageId={setEditingMessageId}
+      setMessages={setMessages}
+      setTempMessages={setTempMessages}
+      setReplyingToMessage={setReplyingToMessage}
+      setHoveredMessage={setHoveredMessage}
+      setTargetMessageId={setTargetMessageId}
+      paginationActions={paginationActions}
+      handleEditMessage={handleEditMessage}
+      handleDeleteMessage={handleDeleteMessage}
+    />
   );
 
   // Removed search navigator

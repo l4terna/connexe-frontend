@@ -164,6 +164,7 @@ const VirtualizedMessageList: React.FC<MessageListProps> = ({
   const rowHeights = useRef<Record<number, number>>({});
   const prevItemCount = useRef(0);
   const [containerHeight, setContainerHeight] = useState(600);
+  const [previousScrollHeight, setPreviousScrollHeight] = useState(0);
   const isInitialRender = useRef(true);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastScrollOffset = useRef(0);
@@ -639,6 +640,12 @@ const VirtualizedMessageList: React.FC<MessageListProps> = ({
               };
             }
             
+            // Save current scroll height and scroll offset before pagination
+            const scrollContainer = (listRef.current as any)?._outerRef;
+            const currentScrollHeight = scrollContainer ? scrollContainer.scrollHeight : 0;
+            setPreviousScrollHeight(currentScrollHeight);
+            scrollRestorationRef.current.offset = scrollOffset;
+            
             isPaginatingRef.current = true;
             paginationActions.setLoadingMode('pagination');
             paginationActions.setBeforeId(oldestMessage.id);
@@ -763,43 +770,40 @@ const VirtualizedMessageList: React.FC<MessageListProps> = ({
 
   // Handle scroll restoration after pagination
   useEffect(() => {
-    if (prevItemCount.current < listItems.length && listRef.current && scrollRestorationRef.current.messageId) {
-      // Find saved message in new list
-      const targetIndex = listItems.findIndex(
-        item => item.type === 'message' && item.data?.id === scrollRestorationRef.current.messageId
-      );
-      
-      if (targetIndex !== -1) {
-        // Calculate height of all elements before target
-        let heightBeforeTarget = 0;
-        for (let i = 0; i < targetIndex; i++) {
-          heightBeforeTarget += rowHeights.current[i] || 100;
+    if (prevItemCount.current < listItems.length && listRef.current && isPaginatingRef.current && previousScrollHeight > 0) {
+      // Get real scroll height from DOM
+      const scrollContainer = (listRef.current as any)?._outerRef;
+      const currentScrollHeight = scrollContainer ? scrollContainer.scrollHeight : 0;
+      const heightDelta = currentScrollHeight - previousScrollHeight;
+      console.log("h", heightDelta, "current:", currentScrollHeight, "previous:", previousScrollHeight)
+      // Only process if there's a meaningful change (not just small fluctuations)
+      if (Math.abs(heightDelta) > 50) {
+        // Output height delta to chat (console.log for now)
+        console.log(`Scroll height delta: ${heightDelta > 0 ? '+' : ''}${heightDelta}px (${previousScrollHeight}px → ${currentScrollHeight}px)`);
+        
+        // Update previous height to current
+        setPreviousScrollHeight(currentScrollHeight);
+        
+        // Scroll to previous position + height delta + container height (only for positive deltas)
+        if (heightDelta > 0) {
+          requestAnimationFrame(() => {
+            if (listRef.current) {
+              const newScrollPosition = scrollRestorationRef.current.offset + heightDelta + containerHeight;
+              listRef.current.scrollTo(newScrollPosition);
+              
+              // Clear restoration data and reset pagination flag
+              scrollRestorationRef.current = { 
+                messageId: null, 
+                offset: 0, 
+                totalHeightBefore: 0 
+              };
+              isPaginatingRef.current = false;
+            }
+          });
         }
-        
-        // KEY FORMULA: restore position
-        // New position = element position - saved offset from viewport
-        const restoredScrollPosition = heightBeforeTarget - scrollRestorationRef.current.offset;
-        
-        // Reset heights for correct recalculation
-        listRef.current.resetAfterIndex(0, true);
-        
-        // Apply restored position in next frame
-        requestAnimationFrame(() => {
-          if (listRef.current) {
-            listRef.current.scrollTo(Math.max(0, restoredScrollPosition));
-            
-            // Clear restoration data
-            scrollRestorationRef.current = { 
-              messageId: null, 
-              offset: 0, 
-              totalHeightBefore: 0 
-            };
-          }
-        });
-        
-        // Important: exit function to not execute normal logic
-        return;
       }
+      
+      return;
     }
     
     // Normal logic for new messages at bottom

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Skeleton } from '@mui/material';
-import MessageList from './components/MessageList';
+import VirtualizedMessageList from './components/VirtualizedMessageList';
 import ChatHeader from './components/ChatHeader';
 import DeleteMessageDialog from './components/DeleteMessageDialog';
 import NewMessagesIndicator from './components/NewMessagesIndicator';
@@ -250,6 +250,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     (paginationState.loadingMode === 'initial' || 
      paginationState.loadingMode === 'pagination' ||
      (paginationState.loadingMode === null && (paginationState.beforeId !== null || paginationState.afterId !== null)));
+     
      
   const queryParams = shouldRunMainQuery ? {
     channelId: activeChannel?.id ?? 0,
@@ -1311,7 +1312,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Define a component to render message list
   const renderMessages = () => (
-    <MessageList
+    <VirtualizedMessageList
       activeChannel={activeChannel}
       messages={messages}
       tempMessages={tempMessages}

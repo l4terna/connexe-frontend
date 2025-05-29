@@ -1,7 +1,9 @@
-import React from 'react';
-import { Box, Typography } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Typography, IconButton, Tooltip, Fade } from '@mui/material';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import ReplyIcon from '@mui/icons-material/Reply';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import UserAvatar from '../../../UserAvatar';
 import DOMPurify from 'dompurify';
 import { ExtendedMessage } from '../types/message';
@@ -45,18 +47,32 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
   searchQuery,
   currentUserId,
   hubId,
+  onReply,
+  onEdit,
+  onDelete,
   onReplyClick,
   onMouseEnter,
   onMouseLeave,
 }) => {
+  const [isHovered, setIsHovered] = useState(false);
   return (
     <Box
       id={`message-${message.id}`}
       className="message-item"
       data-date={message.created_at}
       data-msg-id={message.id.toString()}
-      onMouseEnter={(e) => !isTempMessage && onMouseEnter?.(e, message)}
-      onMouseLeave={() => !isTempMessage && onMouseLeave?.()}
+      onMouseEnter={(e) => {
+        if (!isTempMessage) {
+          setIsHovered(true);
+          onMouseEnter?.(e, message);
+        }
+      }}
+      onMouseLeave={() => {
+        if (!isTempMessage) {
+          setIsHovered(false);
+          onMouseLeave?.();
+        }
+      }}
       sx={{
         display: 'flex',
         gap: 2,
@@ -86,6 +102,89 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
         },
       }}
     >
+      {/* Message Actions - positioned relative to the entire message */}
+      <Fade in={isHovered && !isTempMessage} timeout={200}>
+        <Box
+          sx={{
+            position: 'absolute',
+            top: -40,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            gap: 0.5,
+            zIndex: 10,
+            background: 'rgba(20,20,35,0.95)',
+            borderRadius: 2,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3), 0 0 8px rgba(149,128,255,0.2)',
+            px: 1,
+            py: 0.5,
+            border: '1px solid rgba(149,128,255,0.25)',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <Tooltip title="Ответить" enterDelay={1000} placement="top">
+            <IconButton 
+              size="small" 
+              onClick={() => onReply?.(message)}
+              sx={{ 
+                color: '#00FFBA', 
+                transition: 'all 0.2s ease',
+                padding: '4px',
+                backgroundColor: 'rgba(0, 255, 186, 0.12)',
+                '&:hover': { 
+                  color: '#00FFBA',
+                  backgroundColor: 'rgba(0, 255, 186, 0.25)',
+                  transform: 'scale(1.1)',
+                } 
+              }}
+            >
+              <ReplyIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          
+          {message.author.id === currentUserId && (
+            <Tooltip title="Редактировать" enterDelay={1000} placement="top">
+              <IconButton 
+                size="small" 
+                onClick={() => onEdit?.(message.id)}
+                sx={{ 
+                  color: '#00CFFF', 
+                  transition: 'all 0.2s ease',
+                  padding: '4px',
+                  backgroundColor: 'rgba(0, 207, 255, 0.12)',
+                  '&:hover': { 
+                    color: '#00CFFF',
+                    backgroundColor: 'rgba(0, 207, 255, 0.25)',
+                    transform: 'scale(1.1)',
+                  } 
+                }}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          
+          <Tooltip title="Удалить" enterDelay={1000} placement="top">
+            <IconButton 
+              size="small" 
+              onClick={() => onDelete?.(message.id)}
+              sx={{ 
+                color: '#FF3D71', 
+                transition: 'all 0.2s ease',
+                padding: '4px',
+                backgroundColor: 'rgba(255, 61, 113, 0.12)',
+                '&:hover': { 
+                  color: '#FF3D71',
+                  backgroundColor: 'rgba(255, 61, 113, 0.25)',
+                  transform: 'scale(1.1)',
+                } 
+              }}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Fade>
       <Box 
         sx={{ 
           display: 'flex', 

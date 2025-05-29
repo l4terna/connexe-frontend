@@ -4,7 +4,6 @@ import MessageList from './components/MessageList';
 import ChatHeader from './components/ChatHeader';
 import DeleteMessageDialog from './components/DeleteMessageDialog';
 import NewMessagesIndicator from './components/NewMessagesIndicator';
-import MessageActionsWrapper from './components/MessageActionsWrapper';
 import ChatFooter from './components/ChatFooter';
 import { useNotification } from '@/context/NotificationContext';
 import { hasPermission } from '@/utils/rolePermissions';
@@ -232,13 +231,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   );
   
   
-  // Состояние для портала действий над сообщениями
-  const [hoveredMessage, setHoveredMessage] = useState<{
-    element: HTMLElement;
-    message: ExtendedMessage;
-  } | null>(null);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isHoveringPortal = useRef(false);
   
   const MESSAGES_PER_PAGE = 40;
   
@@ -1218,14 +1210,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Debounced sending of unread messages is now handled by useMessageReadStatus hook
 
-  // Cleanup hover timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-      }
-    };
-  }, []);
 
 
 
@@ -1364,8 +1348,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       messagesEndRef={messagesEndRef}
       editInputRef={editInputRef}
       highlightTimeoutRef={highlightTimeoutRef}
-      hoverTimeoutRef={hoverTimeoutRef}
-      isHoveringPortal={isHoveringPortal}
       scrollToMessageIdRef={scrollToMessageIdRef}
       setHighlightedMessages={setHighlightedMessages}
       setFocusedMessageId={setFocusedMessageId}
@@ -1373,7 +1355,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setMessages={setMessages}
       setTempMessages={setTempMessages}
       setReplyingToMessage={setReplyingToMessage}
-      setHoveredMessage={setHoveredMessage}
       setTargetMessageId={setTargetMessageId}
       paginationActions={paginationActions}
       handleEditMessage={handleEditMessage}
@@ -1456,17 +1437,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         onReplyClick={scrollToMessage}
       />
       
-      {/* Portal for message actions */}
-      <MessageActionsWrapper
-        hoveredMessage={hoveredMessage}
-        userId={user.id}
-        isHoveringPortal={isHoveringPortal}
-        hoverTimeoutRef={hoverTimeoutRef}
-        setHoveredMessage={setHoveredMessage}
-        setReplyingToMessage={setReplyingToMessage}
-        setEditingMessageId={setEditingMessageId}
-        handleDeleteMessage={handleDeleteMessage}
-      />
     </Box>
   );
 };

@@ -83,8 +83,6 @@ interface MessageListProps {
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   editInputRef: React.RefObject<HTMLInputElement | null>;
   highlightTimeoutRef: React.MutableRefObject<NodeJS.Timeout | null>;
-  hoverTimeoutRef: React.MutableRefObject<NodeJS.Timeout | null>;
-  isHoveringPortal: React.MutableRefObject<boolean>;
   scrollToMessageIdRef: React.MutableRefObject<number | null>;
 
   // Actions
@@ -94,10 +92,6 @@ interface MessageListProps {
   setMessages: React.Dispatch<React.SetStateAction<ExtendedMessage[]>>;
   setTempMessages: React.Dispatch<React.SetStateAction<Map<string, ExtendedMessage>>>;
   setReplyingToMessage: React.Dispatch<React.SetStateAction<ExtendedMessage | null>>;
-  setHoveredMessage: React.Dispatch<React.SetStateAction<{
-    element: HTMLElement;
-    message: ExtendedMessage;
-  } | null>>;
   setTargetMessageId: React.Dispatch<React.SetStateAction<number | null>>;
   paginationActions: {
     setIsJumpingToMessage: (value: boolean) => void;
@@ -138,8 +132,6 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     messagesEndRef,
     editInputRef,
     highlightTimeoutRef,
-    hoverTimeoutRef,
-    isHoveringPortal,
     scrollToMessageIdRef,
     setHighlightedMessages,
     setFocusedMessageId,
@@ -147,7 +139,6 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     setMessages,
     setTempMessages,
     setReplyingToMessage,
-    setHoveredMessage,
     setTargetMessageId,
     paginationActions,
     handleEditMessage,
@@ -551,24 +542,10 @@ const MessageList: React.FC<MessageListProps> = (props) => {
           onEdit={(messageId) => setEditingMessageId(messageId)}
           onDelete={(messageId) => handleDeleteMessage(messageId)}
           onReplyClick={handleReplyClick}
-          onMouseEnter={(e, message) => {
-            if (hoverTimeoutRef.current) {
-              clearTimeout(hoverTimeoutRef.current);
-              hoverTimeoutRef.current = null;
-            }
-            setHoveredMessage({ element: e.currentTarget, message });
-          }}
-          onMouseLeave={() => {
-            hoverTimeoutRef.current = setTimeout(() => {
-              if (!isHoveringPortal.current) {
-                setHoveredMessage(null);
-              }
-            }, 100);
-          }}
         />
       </Box>
     );
-  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, setHoveredMessage, handleEditMessage]);
+  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, handleEditMessage]);
 
   // Effect to handle scroll to message when ref changes
   useEffect(() => {
@@ -651,7 +628,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         <Box
           sx={{
             position: 'sticky',
-            top: 0,
+            top: 35,
             zIndex: 10,
             alignSelf: 'center',
             backgroundColor: 'rgba(30,30,47,0.85)',

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Skeleton } from '@mui/material';
-import VirtualizedMessageList from './components/VirtualizedMessageList';
+import MessageList from './components/MessageList';
 import ChatHeader from './components/ChatHeader';
 import DeleteMessageDialog from './components/DeleteMessageDialog';
 import NewMessagesIndicator from './components/NewMessagesIndicator';
@@ -108,6 +108,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const messagesLengthRef = useRef<number>(0);
+  const scrollToMessageIdRef = useRef<number | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState<number | null>(null);
   const [deleteForEveryone, setDeleteForEveryone] = useState(false);
@@ -454,7 +455,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Scroll to bottom only for initial load
       if (paginationState.loadingMode === 'initial') {
         setTimeout(() => {
-          scrollToBottom(false);
+          scrollToBottom();
         }, 50);
       }
       return;
@@ -492,14 +493,17 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Прокручиваем вниз только при начальной загрузке
       setTimeout(() => {
-        scrollToBottom(false);
+        scrollToBottom();
         paginationActions.setLoadingMode(null); // Сбрасываем режим после обработки
         isLoadingMoreRef.current = false; // Разблокируем пагинацию
       }, 150);
     }
   }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationState.beforeId, paginationState.afterId, paginationActions, lastAroundId, messages.length]);
 
-  // Effect to scroll to target message when loaded
+  // Store target message ID to pass to MessageList
+  const targetMessageIdRef = useRef<number | null>(null);
+  
+  // Effect to handle target message navigation after around loading
   useEffect(() => {
     if (targetMessageId && messages.length > 0 && paginationState.loadingMode === 'around' && !isLoadingAround) {
       const targetExists = messages.some(msg => msg.id === targetMessageId);
@@ -508,13 +512,33 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         // Продолжаем блокировать пагинацию во время анимации
         isLoadingMoreRef.current = true;
         
+        // Set target message ID for MessageList to handle scrolling and highlighting
+        targetMessageIdRef.current = targetMessageId;
+        scrollToMessageIdRef.current = targetMessageId;
+        
+        // Highlight the target message
+        setHighlightedMessages(prev => {
+          const newSet = new Set(prev);
+          newSet.add(targetMessageId);
+          return newSet;
+        });
+        setFocusedMessageId(targetMessageId);
+        
+        // Remove highlight after delay
+        setTimeout(() => {
+          setHighlightedMessages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(targetMessageId);
+            return newSet;
+          });
+          setFocusedMessageId(null);
+        }, 1500);
+        
         // Даем время DOM обновиться
         setTimeout(() => {
-          // Прокручиваем к сообщению
-          scrollToMessage(targetMessageId);
-          
           // Сбрасываем состояния после прокрутки
           setTargetMessageId(null);
+          targetMessageIdRef.current = null;
           paginationActions.setAroundMessageId(null);
           
           // Подготавливаем пагинацию для нормальной работы после around
@@ -541,7 +565,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         }, 200);
       } 
     }
-  }, [messages, targetMessageId, scrollToMessage, paginationState.loadingMode, isLoadingAround, paginationActions]);
+  }, [messages, targetMessageId, paginationState.loadingMode, isLoadingAround, paginationActions, setHighlightedMessages, setFocusedMessageId]);
 
   // Remove old auto-scroll effect - now handled in main message loading effect
 
@@ -630,7 +654,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Scroll to bottom immediately after adding the temporary message
       setTimeout(() => {
-        scrollToBottom(true); // Use smooth scrolling when sending a message
+        scrollToBottom();
       }, 10);
       
       resetForm();
@@ -869,48 +893,58 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     const container = messagesContainerRef.current;
     if (!container) return;
 
+    let scrollThrottle = false;
+    
     const handleScroll = () => {
-      // Используем функцию пагинации из хука
-      paginationActions.handleScrollPagination(container, messages, MESSAGES_PER_PAGE);
+      // Throttle scroll updates
+      if (scrollThrottle) return;
+      scrollThrottle = true;
       
-      // Check for unread messages in the viewport to highlight them
-      const visibleElements = container.querySelectorAll('.message-item');
-      if (!visibleElements.length) return;
-      
-      // Process visible elements for highlighting
-      visibleElements.forEach(element => {
-        const rect = element.getBoundingClientRect();
-        const containerRect = container.getBoundingClientRect();
-        const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+      requestAnimationFrame(() => {
+        // Используем функцию пагинации из хука
+        paginationActions.handleScrollPagination(container, messages, MESSAGES_PER_PAGE);
         
-        if (isVisible) {
-          // Highlight unread messages
-          const messageId = parseInt(element.getAttribute('data-msg-id') || '0', 10);
-          if (messageId) {
-            const message = messages.find(m => m.id === messageId);
-            if (message && message.author.id !== user.id && message.status !== MessageStatus.READ) {
-              // Add to highlighted set for visual effect
-              setHighlightedMessages(prev => {
-                const newSet = new Set(prev);
-                newSet.add(messageId);
-                return newSet;
-              });
-              
-              // Remove highlight after 1.5 seconds
-              setTimeout(() => {
-                setHighlightedMessages(prev => {
-                  const newSet = new Set(prev);
-                  newSet.delete(messageId);
-                  return newSet;
-                });
-              }, 1500);
+        // Check for unread messages in the viewport to highlight them (less frequently)
+        const visibleElements = container.querySelectorAll('.message-item');
+        if (visibleElements.length) {
+          // Process visible elements for highlighting
+          visibleElements.forEach(element => {
+            const rect = element.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+            
+            if (isVisible) {
+              // Highlight unread messages
+              const messageId = parseInt(element.getAttribute('data-msg-id') || '0', 10);
+              if (messageId) {
+                const message = messages.find(m => m.id === messageId);
+                if (message && message.author.id !== user.id && message.status !== MessageStatus.READ) {
+                  // Add to highlighted set for visual effect
+                  setHighlightedMessages(prev => {
+                    const newSet = new Set(prev);
+                    newSet.add(messageId);
+                    return newSet;
+                  });
+                  
+                  // Remove highlight after 1.5 seconds
+                  setTimeout(() => {
+                    setHighlightedMessages(prev => {
+                      const newSet = new Set(prev);
+                      newSet.delete(messageId);
+                      return newSet;
+                    });
+                  }, 1500);
+                }
+              }
             }
-          }
+          });
         }
+        
+        scrollThrottle = false;
       });
     };
 
-    container.addEventListener('scroll', handleScroll);
+    container.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
       container.removeEventListener('scroll', handleScroll);
     };
@@ -1104,8 +1138,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     let intentionalScrollUp = false;
     let scrollMovementStartTime = 0;
     let scrollTimeoutId: NodeJS.Timeout | null = null;
+    let scrollThrottle = false;
 
     const handleScroll = () => {
+      // Throttle scroll updates
+      if (scrollThrottle) return;
+      scrollThrottle = true;
+      
+      requestAnimationFrame(() => {
       // Clear previous timeout if exists
       if (scrollTimeoutId) {
         clearTimeout(scrollTimeoutId);
@@ -1162,13 +1202,16 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         resetUnreadCounts();
           }
       
-      // Set a timeout to determine when scrolling has stopped
-      scrollTimeoutId = setTimeout(() => {
-        scrollTimeoutId = null;
-      }, 150);
+        // Set a timeout to determine when scrolling has stopped
+        scrollTimeoutId = setTimeout(() => {
+          scrollTimeoutId = null;
+        }, 150);
+        
+        scrollThrottle = false;
+      });
     };
 
-    container.addEventListener('scroll', handleScroll);
+    container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
   }, [activeChannel, paginationState.enableAfterPagination, paginationState.hasMoreMessagesAfter, messages]);
 
@@ -1185,19 +1228,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   }, []);
 
 
-  // Remove old scroll-based read status handling
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    const handleScroll = () => {
-      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-      setIsScrolledToBottom(isAtBottom);
-    };
-
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1230,7 +1260,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           const { scrollHeight, scrollTop, clientHeight } = messagesContainerRef.current;
           const scrollPosition = scrollHeight - scrollTop - clientHeight;
           if (scrollPosition < 200) {
-            scrollToBottom(true);
+            scrollToBottom();
           }
         }
       }, 100);
@@ -1312,7 +1342,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Define a component to render message list
   const renderMessages = () => (
-    <VirtualizedMessageList
+    <MessageList
       activeChannel={activeChannel}
       messages={messages}
       tempMessages={tempMessages}
@@ -1336,6 +1366,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       highlightTimeoutRef={highlightTimeoutRef}
       hoverTimeoutRef={hoverTimeoutRef}
       isHoveringPortal={isHoveringPortal}
+      scrollToMessageIdRef={scrollToMessageIdRef}
       setHighlightedMessages={setHighlightedMessages}
       setFocusedMessageId={setFocusedMessageId}
       setEditingMessageId={setEditingMessageId}

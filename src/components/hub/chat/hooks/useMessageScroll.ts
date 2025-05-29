@@ -20,7 +20,7 @@ interface UseMessageScrollReturn {
   setCurrentDateLabel: (value: string | null) => void;
   disableAutoScroll: boolean;
   setDisableAutoScroll: (value: boolean) => void;
-  scrollToBottom: (smooth?: boolean) => void;
+  scrollToBottom: () => void;
   scrollToMessage: (messageId: number) => void;
   handleScrollToBottom: () => void;
 }
@@ -42,16 +42,9 @@ export const useMessageScroll = ({
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Function to scroll to bottom
-  const scrollToBottom = useCallback((smooth = false) => {
+  const scrollToBottom = useCallback(() => {
     if (messagesContainerRef.current && !disableAutoScroll) {
-      if (smooth) {
-        messagesContainerRef.current.scrollTo({
-          top: messagesContainerRef.current.scrollHeight,
-          behavior: 'smooth'
-        });
-      } else {
-        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-      }
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
       setShowScrollButton(false);
     }
   }, [disableAutoScroll, messagesContainerRef]);
@@ -78,10 +71,7 @@ export const useMessageScroll = ({
     const scrollTop = messageTop - (containerHeight / 2) + (messageHeight / 2);
     
     // Scroll to the message
-    container.scrollTo({
-      top: Math.max(0, scrollTop),
-      behavior: 'smooth'
-    });
+    container.scrollTop = Math.max(0, scrollTop);
     
     // Highlight the message
     messageElement.style.transition = 'background-color 0.3s ease-in-out';
@@ -109,7 +99,7 @@ export const useMessageScroll = ({
     }
     
     // Scroll to bottom
-    scrollToBottom(false);
+    scrollToBottom();
   }, [scrollToBottom, onMarkAllAsRead]);
 
   // Helper function to format date for group

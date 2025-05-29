@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useCallback, useMemo, useImperativeHandle } from 'react';
 import { Box, Typography, Fade, Skeleton, IconButton } from '@mui/material';
 import UserAvatar from '../../../UserAvatar';
 import ChatMessageItem from './ChatMessageItem';
@@ -27,10 +27,10 @@ const formatDateForGroup = (timestamp: string) => {
   yesterday.setDate(yesterday.getDate() - 1);
 
   if (date.toDateString() === today.toDateString()) {
-    return 'Today';
+    return 'Сегодня';
   }
   if (date.toDateString() === yesterday.toDateString()) {
-    return 'Yesterday';
+    return 'Вчера';
   }
   
   const isCurrentYear = date.getFullYear() === today.getFullYear();
@@ -84,6 +84,10 @@ interface MessageListProps {
   editInputRef: React.RefObject<HTMLInputElement | null>;
   highlightTimeoutRef: React.MutableRefObject<NodeJS.Timeout | null>;
   scrollToMessageIdRef: React.MutableRefObject<number | null>;
+  scrollCorrectionRef?: React.RefObject<{
+    prepareScrollCorrection: () => void;
+    setDisableSmoothScroll: (value: boolean) => void;
+  } | null>;
 
   // Actions
   setHighlightedMessages: React.Dispatch<React.SetStateAction<Set<number>>>;
@@ -146,13 +150,17 @@ const MessageList: React.FC<MessageListProps> = (props) => {
   } = props;
 
 
+  // State for controlling smooth scroll behavior
+  const [disableSmoothScroll, setDisableSmoothScroll] = React.useState(false);
+  
   // Use virtualization hook
   const {
     virtualItems,
     totalSize,
     scrollToMessage,
     measureElement,
-    processedItems
+    processedItems,
+    prepareScrollCorrection
   } = useMessageVirtualization(messages, tempMessages, messagesContainerRef, {
     // estimatedMessageHeight: 80,
     // estimatedDateHeight: 60,
@@ -166,6 +174,12 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     // Prevent scroll adjustment when loading messages with after parameter
     preventScrollAdjustment: paginationState.afterId !== null
   });
+  
+  // Expose prepareScrollCorrection to parent component
+  useImperativeHandle(props.scrollCorrectionRef, () => ({
+    prepareScrollCorrection,
+    setDisableSmoothScroll
+  }), [prepareScrollCorrection]);
 
   // Store previous message for grouping logic
   const getPreviousMessage = useCallback((currentIndex: number): ExtendedMessage | null => {
@@ -584,6 +598,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
           flex: 1, 
           position: 'relative',
           overflowY: 'auto',
+          scrollBehavior: disableSmoothScroll ? 'auto' : 'smooth',
           '&::-webkit-scrollbar': {
             width: '8px',
           },
@@ -614,6 +629,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         flex: 1, 
         position: 'relative',
         overflowY: 'auto',
+        scrollBehavior: disableSmoothScroll ? 'auto' : 'smooth',
         '&::-webkit-scrollbar': {
           width: '8px',
         },

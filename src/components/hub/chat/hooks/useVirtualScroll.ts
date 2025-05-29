@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { ExtendedMessage } from '../types/message';
 
 interface VirtualItem {
@@ -24,6 +24,7 @@ interface UseVirtualScrollResult {
   scrollToIndex: (index: number, align?: 'start' | 'center' | 'end') => void;
   scrollToOffset: (offset: number) => void;
   measureElement: (index: number, element: HTMLElement | null) => void;
+  prepareScrollCorrection: () => void;
 }
 
 export const useVirtualScroll = (
@@ -56,6 +57,13 @@ export const useVirtualScroll = (
   
   // Дебаунс для обновления измерений
   const measurementUpdateTimeoutRef = useRef<NodeJS.Timeout | undefined>();
+  
+  // Scroll correction state for pagination
+  const [scrollCorrection, setScrollCorrection] = useState<{
+    heightBefore: number;
+    scrollBefore: number;
+    shouldCorrect: boolean;
+  } | null>(null);
   
   // Обновляем setMeasurementVersion чтобы использовать дебаунс
   const updateMeasurements = useCallback(() => {
@@ -325,13 +333,51 @@ export const useVirtualScroll = (
 
     element.scrollTop = Math.max(0, offset);
   }, []); // Empty dependencies - getScrollElement is accessed within callback
+  
+  // Function to prepare scroll correction before content changes
+  const prepareScrollCorrection = useCallback(() => {
+    const element = getScrollElement();
+    if (!element || preventScrollAdjustment) return;
+    
+    setScrollCorrection({
+      heightBefore: element.scrollHeight,
+      scrollBefore: element.scrollTop,
+      shouldCorrect: true
+    });
+  }, [getScrollElement, preventScrollAdjustment]);
+  
+  // Synchronous scroll correction after content changes
+  useLayoutEffect(() => {
+    if (!scrollCorrection?.shouldCorrect) return;
+    
+    const element = getScrollElement();
+    if (!element) return;
+    
+    // Calculate height difference
+    const heightAfter = element.scrollHeight;
+    const heightDiff = heightAfter - scrollCorrection.heightBefore;
+    
+    if (heightDiff > 0) {
+      // Correct scroll position synchronously
+      element.scrollTop = scrollCorrection.scrollBefore + heightDiff;
+      
+      // Ensure minimum distance from top
+      if (element.scrollTop < 150) {
+        element.scrollTop = 150;
+      }
+    }
+    
+    // Reset correction state
+    setScrollCorrection(null);
+  }, [scrollCorrection, getScrollElement]);
 
   return {
     virtualItems,
     totalSize,
     scrollToIndex,
     scrollToOffset,
-    measureElement
+    measureElement,
+    prepareScrollCorrection
   };
 };
 
@@ -541,6 +587,7 @@ export const useMessageVirtualization = (
     ...virtualScroll,
     processedItems,
     scrollToMessage,
-    containerHeight
+    containerHeight,
+    prepareScrollCorrection: virtualScroll.prepareScrollCorrection
   };
 };

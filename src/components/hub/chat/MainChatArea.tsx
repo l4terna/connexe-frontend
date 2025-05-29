@@ -75,6 +75,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   
   // Refs должны быть объявлены до использования в хуках
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const scrollCorrectionRef = useRef<{
+    prepareScrollCorrection: () => void;
+    setDisableSmoothScroll: (value: boolean) => void;
+  }>(null);
   
   // Использование хука для работы с прочитанными сообщениями
   const { markMessageAsRead, markAllMessagesAsRead, addToReadBuffer, unreadMessagesBufferRef } = useMessageReadStatus({
@@ -1018,10 +1022,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       const container = messagesContainerRef.current;
       if (!container) return;
       
-      
-      // Store the scroll height and scroll position BEFORE adding new messages
-      const scrollHeightBefore = container.scrollHeight;
-      const scrollPositionBefore = container.scrollTop;
+      // Prepare scroll correction before updating messages
+      if (scrollCorrectionRef.current) {
+        scrollCorrectionRef.current.prepareScrollCorrection();
+        scrollCorrectionRef.current.setDisableSmoothScroll(true);
+      }
       
       // Check if we received less messages than requested
       if (messagesData.length < MESSAGES_PER_PAGE) {
@@ -1064,29 +1069,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         return mergedMessages;
       });
 
-      // Корректируем позицию скролла после загрузки
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          const scrollHeightAfter = container.scrollHeight;
-          const heightAdded = scrollHeightAfter - scrollHeightBefore;
-          
-          // Вычисляем целевую позицию скролла
-          const targetScrollTop = scrollPositionBefore + heightAdded;
-          
-          // Устанавливаем позицию скролла
-          container.scrollTop = targetScrollTop;
-          
-          // Проверяем, не остались ли мы слишком близко к верху после корректировки
-          // Если да, сдвигаем немного вниз, чтобы предотвратить повторную загрузку
-          if (container.scrollTop < 100) {
-            // Сдвигаем скролл на 150 пикселей вниз от верха
-            container.scrollTop = 150;
-          }
-          
-          isLoadingMoreRef.current = false;
-          paginationActions.setLoadingMode(null);
-        }, 50);
-      });
+      // Re-enable smooth scroll after a delay
+      setTimeout(() => {
+        if (scrollCorrectionRef.current) {
+          scrollCorrectionRef.current.setDisableSmoothScroll(false);
+        }
+        isLoadingMoreRef.current = false;
+        paginationActions.setLoadingMode(null);
+      }, 100);
     }
   }, [messagesData, paginationState.beforeId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions]);
 
@@ -1419,6 +1409,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       paginationActions={paginationActions}
       handleEditMessage={handleEditMessage}
       handleDeleteMessage={handleDeleteMessage}
+      scrollCorrectionRef={scrollCorrectionRef}
     />
   );
 

@@ -110,10 +110,10 @@ export const useMessageScroll = ({
     yesterday.setDate(yesterday.getDate() - 1);
 
     if (date.toDateString() === today.toDateString()) {
-      return 'Today';
+      return 'Сегодня';
     }
     if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
+      return 'Вчера';
     }
     
     const isCurrentYear = date.getFullYear() === today.getFullYear();

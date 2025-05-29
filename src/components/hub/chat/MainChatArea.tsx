@@ -888,67 +888,67 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     paginationActions.setAroundMessageId(message.id);
   }, [clearSearch, paginationActions, setDisableAutoScroll, isLoadingMoreRef, setMessages, setTempMessages, messagesLengthRef, setUnreadMessages, resetUnreadCounts, setTargetMessageId]);
 
-  // Handle scroll pagination
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
+  // Handle scroll pagination - DISABLED because virtual scroll handles it
+  // useEffect(() => {
+  //   const container = messagesContainerRef.current;
+  //   if (!container) return;
 
-    let scrollThrottle = false;
+  //   let scrollThrottle = false;
     
-    const handleScroll = () => {
-      // Throttle scroll updates
-      if (scrollThrottle) return;
-      scrollThrottle = true;
+  //   const handleScroll = () => {
+  //     // Throttle scroll updates
+  //     if (scrollThrottle) return;
+  //     scrollThrottle = true;
       
-      requestAnimationFrame(() => {
-        // Используем функцию пагинации из хука
-        paginationActions.handleScrollPagination(container, messages, MESSAGES_PER_PAGE);
+  //     requestAnimationFrame(() => {
+  //       // Используем функцию пагинации из хука
+  //       paginationActions.handleScrollPagination(container, messages, MESSAGES_PER_PAGE);
         
-        // Check for unread messages in the viewport to highlight them (less frequently)
-        const visibleElements = container.querySelectorAll('.message-item');
-        if (visibleElements.length) {
-          // Process visible elements for highlighting
-          visibleElements.forEach(element => {
-            const rect = element.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
-            const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+  //       // Check for unread messages in the viewport to highlight them (less frequently)
+  //       const visibleElements = container.querySelectorAll('.message-item');
+  //       if (visibleElements.length) {
+  //         // Process visible elements for highlighting
+  //         visibleElements.forEach(element => {
+  //           const rect = element.getBoundingClientRect();
+  //           const containerRect = container.getBoundingClientRect();
+  //           const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
             
-            if (isVisible) {
-              // Highlight unread messages
-              const messageId = parseInt(element.getAttribute('data-msg-id') || '0', 10);
-              if (messageId) {
-                const message = messages.find(m => m.id === messageId);
-                if (message && message.author.id !== user.id && message.status !== MessageStatus.READ) {
-                  // Add to highlighted set for visual effect
-                  setHighlightedMessages(prev => {
-                    const newSet = new Set(prev);
-                    newSet.add(messageId);
-                    return newSet;
-                  });
+  //           if (isVisible) {
+  //             // Highlight unread messages
+  //             const messageId = parseInt(element.getAttribute('data-msg-id') || '0', 10);
+  //             if (messageId) {
+  //               const message = messages.find(m => m.id === messageId);
+  //               if (message && message.author.id !== user.id && message.status !== MessageStatus.READ) {
+  //                 // Add to highlighted set for visual effect
+  //                 setHighlightedMessages(prev => {
+  //                   const newSet = new Set(prev);
+  //                   newSet.add(messageId);
+  //                   return newSet;
+  //                 });
                   
-                  // Remove highlight after 1.5 seconds
-                  setTimeout(() => {
-                    setHighlightedMessages(prev => {
-                      const newSet = new Set(prev);
-                      newSet.delete(messageId);
-                      return newSet;
-                    });
-                  }, 1500);
-                }
-              }
-            }
-          });
-        }
+  //                 // Remove highlight after 1.5 seconds
+  //                 setTimeout(() => {
+  //                   setHighlightedMessages(prev => {
+  //                     const newSet = new Set(prev);
+  //                     newSet.delete(messageId);
+  //                     return newSet;
+  //                   });
+  //                 }, 1500);
+  //               }
+  //             }
+  //           }
+  //         });
+  //       }
         
-        scrollThrottle = false;
-      });
-    };
+  //       scrollThrottle = false;
+  //     });
+  //   };
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-    };
-  }, [messages, paginationActions, user.id]);
+  //   container.addEventListener('scroll', handleScroll, { passive: true });
+  //   return () => {
+  //     container.removeEventListener('scroll', handleScroll);
+  //   };
+  // }, [messages, paginationActions, user.id]);
 
   // Handle pagination loading
   useEffect(() => {
@@ -1425,6 +1425,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         handleSearchInputChange={handleSearchInputChange}
         clearSearch={clearSearch}
         onSearchResultClick={handleSearchResultClick}
+        isLoadingMessages={isLoading || isFetching}
+        isLoadingAround={isLoadingAround}
+        paginationState={{
+          loadingMode: paginationState.loadingMode,
+          beforeId: paginationState.beforeId,
+          afterId: paginationState.afterId,
+          isJumpingToMessage: paginationState.isJumpingToMessage,
+        }}
       />
 
       {isLoading && !paginationState.beforeId ? renderSkeleton() : renderMessages()}

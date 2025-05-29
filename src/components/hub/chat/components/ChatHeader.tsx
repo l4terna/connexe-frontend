@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Typography } from '@mui/material';
 import SearchBar from './SearchBar';
 import { Channel, Message } from '../../../../api/channels';
+import { LoadingMode } from '../hooks/useMessagePagination';
 
 interface ChatHeaderProps {
   activeChannel: Channel | null;
@@ -18,6 +19,15 @@ interface ChatHeaderProps {
   handleSearchInputChange: (value: string) => void;
   clearSearch: () => void;
   onSearchResultClick: (message: Message) => void;
+  // Loading states
+  isLoadingMessages?: boolean;
+  isLoadingAround?: boolean;
+  paginationState?: {
+    loadingMode: LoadingMode;
+    beforeId: number | null;
+    afterId: number | null;
+    isJumpingToMessage: boolean;
+  };
 }
 
 /**
@@ -38,7 +48,31 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   handleSearchInputChange,
   clearSearch,
   onSearchResultClick,
+  isLoadingMessages = false,
+  isLoadingAround = false,
+  paginationState,
 }) => {
+  // Determine if we should show loading indicator
+  const isLoading = isLoadingMessages || isLoadingAround || 
+    (paginationState?.loadingMode === 'pagination' && 
+     (paginationState.beforeId !== null || paginationState.afterId !== null)) ||
+    (paginationState?.loadingMode === 'around' && paginationState.isJumpingToMessage);
+
+  // Determine loading message
+  const getLoadingMessage = () => {
+    if (isLoadingAround || (paginationState?.loadingMode === 'around' && paginationState.isJumpingToMessage)) {
+      return 'Переход к сообщению...';
+    }
+    if (paginationState?.loadingMode === 'pagination') {
+      if (paginationState.beforeId) return 'Загрузка предыдущих сообщений...';
+      if (paginationState.afterId) return 'Загрузка следующих сообщений...';
+    }
+    if (isLoadingMessages) {
+      return 'Загрузка сообщений...';
+    }
+    return 'Загрузка...';
+  };
+
   return (
     <Box sx={{ 
       height: 60, 
@@ -47,6 +81,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       alignItems: 'center',
       justifyContent: 'space-between',
       borderBottom: '1px solid rgba(255,255,255,0.1)',
+      position: 'relative',
     }}>
       <Typography variant="h6" sx={{ color: '#fff', fontWeight: 700 }}>
         {activeChannel?.name || 'Select a channel'}
@@ -67,6 +102,40 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         clearSearch={clearSearch}
         onSearchResultClick={onSearchResultClick}
       />
+
+      {/* Loading indicator bar */}
+      {isLoading && (
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: '3px',
+            backgroundColor: 'rgba(0, 207, 255, 0.2)',
+            overflow: 'hidden',
+          }}
+        >
+          <Box
+            sx={{
+              height: '100%',
+              width: '100%',
+              background: 'linear-gradient(90deg, transparent, #00CFFF, transparent)',
+              animation: 'loadingSlide 1.5s infinite',
+              '@keyframes loadingSlide': {
+                '0%': {
+                  transform: 'translateX(-100%)',
+                },
+                '100%': {
+                  transform: 'translateX(100%)',
+                },
+              },
+            }}
+          />
+        </Box>
+      )}
+
+
     </Box>
   );
 };

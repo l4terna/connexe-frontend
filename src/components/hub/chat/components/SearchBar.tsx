@@ -49,7 +49,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
 
   if (!searchMode) {
     return (
-      <Tooltip title="Поиск сообщений (Ctrl + F)" placement="top">
+      <Tooltip title="Поиск сообщений" placement="top">
         <IconButton 
           onClick={() => {
             setSearchMode(true);

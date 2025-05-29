@@ -15,6 +15,7 @@ interface UseVirtualScrollOptions {
   estimatedItemSize: number;
   overscan?: number;
   getScrollElement: () => HTMLElement | null;
+  preventScrollAdjustment?: boolean;
 }
 
 interface UseVirtualScrollResult {
@@ -27,13 +28,15 @@ interface UseVirtualScrollResult {
 
 export const useVirtualScroll = (
   items: any[],
-  options: UseVirtualScrollOptions
+  options: UseVirtualScrollOptions & { onScroll?: (element: HTMLElement) => void }
 ): UseVirtualScrollResult => {
   const {
     containerHeight,
     estimatedItemSize,
     overscan = 5,
-    getScrollElement
+    getScrollElement,
+    onScroll,
+    preventScrollAdjustment = false
   } = options;
 
   const [scrollTop, setScrollTop] = useState(0);
@@ -163,9 +166,14 @@ export const useVirtualScroll = (
         setIsScrolling(false);
       }, 150);
       
+      // Call additional onScroll callback if provided
+      if (onScroll) {
+        onScroll(element);
+      }
+      
       scrollThrottleRef.current = false;
     });
-  }, [getScrollElement, isScrolling]);
+  }, [isScrolling, onScroll]); // Added onScroll to dependencies
 
   // Set up scroll listener
   useEffect(() => {
@@ -183,7 +191,7 @@ export const useVirtualScroll = (
         clearTimeout(scrollTimeoutRef.current);
       }
     };
-  }, [handleScroll, getScrollElement]);
+  }, [handleScroll]); // Removed getScrollElement from dependencies
 
   // Initialize ResizeObserver
   useEffect(() => {
@@ -219,11 +227,17 @@ export const useVirtualScroll = (
       if (hasChanges) {
         setMeasurementVersion(v => v + 1);
         
-        // Adjust scroll position to maintain visual stability
-        if (sizeChangeAboveViewport !== 0 && scrollElement) {
-          requestAnimationFrame(() => {
-            scrollElement.scrollTop = currentScrollTop + sizeChangeAboveViewport;
-          });
+        // Only adjust scroll position if user is not actively scrolling
+        // and we're not in a state where new content is being loaded at the bottom
+        if (sizeChangeAboveViewport !== 0 && scrollElement && !isScrolling && !preventScrollAdjustment) {
+          // Check if we're near the bottom - if so, don't adjust scroll position
+          const isNearBottom = (scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight) < 100;
+          
+          if (!isNearBottom) {
+            requestAnimationFrame(() => {
+              scrollElement.scrollTop = currentScrollTop + sizeChangeAboveViewport;
+            });
+          }
         }
       }
     });
@@ -231,7 +245,7 @@ export const useVirtualScroll = (
     return () => {
       resizeObserverRef.current?.disconnect();
     };
-  }, [getScrollElement]);
+  }, [isScrolling, preventScrollAdjustment]);
 
   // Function to measure an element and update cache
   const measureElement = useCallback((index: number, element: HTMLElement | null) => {
@@ -288,7 +302,7 @@ export const useVirtualScroll = (
     }
     
     element.scrollTop = Math.max(0, scrollTo);
-  }, [getScrollElement, items.length, estimatedItemSize, containerHeight]);
+  }, [items.length, estimatedItemSize, containerHeight]); // Removed getScrollElement
 
   // Function to scroll to a specific offset
   const scrollToOffset = useCallback((offset: number) => {
@@ -296,7 +310,7 @@ export const useVirtualScroll = (
     if (!element) return;
 
     element.scrollTop = Math.max(0, offset);
-  }, [getScrollElement]);
+  }, []); // Empty dependencies - getScrollElement is accessed within callback
 
   return {
     virtualItems,
@@ -316,12 +330,16 @@ export const useMessageVirtualization = (
     estimatedMessageHeight?: number;
     estimatedDateHeight?: number;
     overscan?: number;
+    onScroll?: (container: HTMLElement) => void;
+    preventScrollAdjustment?: boolean;
   } = {}
 ) => {
   const {
     estimatedMessageHeight = 80,
     estimatedDateHeight = 60,
-    overscan = 5
+    overscan = 5,
+    onScroll,
+    preventScrollAdjustment = false
   } = options;
 
   const [containerHeight, setContainerHeight] = useState(600);
@@ -342,7 +360,7 @@ export const useMessageVirtualization = (
     }
 
     return () => resizeObserver.disconnect();
-  }, [containerRef]);
+  }, []); // Empty dependencies since containerRef is stable
 
   // Helper function to estimate message height based on content
   const estimateMessageHeight = useCallback((msg: ExtendedMessage, prevMsg: ExtendedMessage | null) => {
@@ -457,7 +475,9 @@ export const useMessageVirtualization = (
     containerHeight,
     estimatedItemSize: estimatedMessageHeight,
     overscan,
-    getScrollElement: () => containerRef.current as HTMLElement
+    getScrollElement: () => containerRef.current as HTMLElement,
+    onScroll,
+    preventScrollAdjustment
   });
 
   // Function to scroll to a specific message
@@ -472,7 +492,7 @@ export const useMessageVirtualization = (
     if (messageIndex !== -1) {
       virtualScroll.scrollToIndex(messageIndex, 'center');
     }
-  }, [processedItems, virtualScroll]);
+  }, [processedItems, virtualScroll.scrollToIndex]); // Only depend on the specific function
 
   return {
     ...virtualScroll,

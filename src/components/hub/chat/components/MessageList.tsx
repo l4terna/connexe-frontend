@@ -164,7 +164,15 @@ const MessageList: React.FC<MessageListProps> = (props) => {
   } = useMessageVirtualization(messages, tempMessages, messagesContainerRef, {
     // estimatedMessageHeight: 80,
     // estimatedDateHeight: 60,
-    overscan: 5
+    overscan: 5,
+    onScroll: useCallback((container: HTMLElement) => {
+      // Handle pagination using the provided function
+      if ('handleScrollPagination' in paginationActions) {
+        (paginationActions as any).handleScrollPagination(container, messages, messagesPerPage);
+      }
+    }, [paginationActions, messages, messagesPerPage]),
+    // Prevent scroll adjustment when loading messages with after parameter
+    preventScrollAdjustment: paginationState.afterId !== null
   });
 
   // Store previous message for grouping logic
@@ -301,7 +309,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         measureElement(item.index, null);
       });
     };
-  }, [virtualItems, measureElement]);
+  }, []); // Empty dependencies to only run on unmount
 
   // Render a single virtual item
   const renderVirtualItem = useCallback((virtualItem: any) => {
@@ -560,7 +568,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         />
       </Box>
     );
-  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, hoverTimeoutRef, setHoveredMessage, isHoveringPortal, measureElement, handleEditMessage, editInputRef]);
+  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, setHoveredMessage, handleEditMessage]);
 
   // Effect to handle scroll to message when ref changes
   useEffect(() => {
@@ -671,46 +679,6 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         </Box>
       </Fade>
 
-      {/* Loading indicator for upward pagination */}
-      {paginationState.loadingMode === 'pagination' && paginationState.beforeId && (
-        <Box sx={{ 
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          py: 2,
-          gap: 1,
-          zIndex: 5,
-          backgroundColor: 'rgba(30,30,47,0.8)',
-        }}>
-          {[...Array(3)].map((_, i) => (
-            <Box
-              key={i}
-              sx={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                backgroundColor: '#00CFFF',
-                animation: 'pulse 1.4s infinite ease-in-out both',
-                animationDelay: `${-0.32 + i * 0.16}s`,
-                '@keyframes pulse': {
-                  '0%, 80%, 100%': {
-                    transform: 'scale(0)',
-                    opacity: 0.5
-                  },
-                  '40%': {
-                    transform: 'scale(1)',
-                    opacity: 1
-                  }
-                }
-              }}
-            />
-          ))}
-        </Box>
-      )}
 
       {/* Virtual scroller container */}
       <Box
@@ -722,46 +690,6 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         {virtualItemsRendered}
       </Box>
 
-      {/* Loading indicator for downward pagination */}
-      {paginationState.loadingMode === 'pagination' && paginationState.afterId && (
-        <Box sx={{ 
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          py: 2,
-          gap: 1,
-          zIndex: 5,
-          backgroundColor: 'rgba(30,30,47,0.8)',
-        }}>
-          {[...Array(3)].map((_, i) => (
-            <Box
-              key={i}
-              sx={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                backgroundColor: '#00CFFF',
-                animation: 'pulse 1.4s infinite ease-in-out both',
-                animationDelay: `${-0.32 + i * 0.16}s`,
-                '@keyframes pulse': {
-                  '0%, 80%, 100%': {
-                    transform: 'scale(0)',
-                    opacity: 0.5
-                  },
-                  '40%': {
-                    transform: 'scale(1)',
-                    opacity: 1
-                  }
-                }
-              }}
-            />
-          ))}
-        </Box>
-      )}
       
       {/* For properly tracking the end of messages for scrolling */}
       <div ref={messagesEndRef} />

@@ -145,6 +145,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     handleDeleteMessage
   } = props;
 
+
   // Use virtualization hook
   const {
     virtualItems,
@@ -179,45 +180,43 @@ const MessageList: React.FC<MessageListProps> = (props) => {
 
   // Handle reply click function
   const handleReplyClick = useCallback((replyId: number) => {
-    // Check if message exists in current list
     const messageExists = messages.some(msg => msg.id === replyId);
     
     if (messageExists) {
-      // Message is in current view, scroll to it with virtualization
-      scrollToMessage(replyId);
-      
-      // Clear any existing highlight timeout
-      if (highlightTimeoutRef.current) {
-        clearTimeout(highlightTimeoutRef.current);
-        highlightTimeoutRef.current = null;
-      }
-      
-      // Clear existing highlights and focused message
-      setFocusedMessageId(null);
-      setHighlightedMessages(new Set());
-      
-      // Highlight the new message
-      setFocusedMessageId(replyId);
-      
-      // Add to highlighted set for visual effect
-      setHighlightedMessages(() => {
-        const newSet = new Set<number>();
-        newSet.add(replyId);
-        return newSet;
+      // Используем scrollToMessage из виртуализации напрямую
+      requestAnimationFrame(() => {
+        scrollToMessage(replyId);
+        
+        // Подсветка сообщения
+        setTimeout(() => {
+          if (highlightTimeoutRef.current) {
+            clearTimeout(highlightTimeoutRef.current);
+            highlightTimeoutRef.current = null;
+          }
+          
+          setFocusedMessageId(null);
+          setHighlightedMessages(new Set());
+          
+          setFocusedMessageId(replyId);
+          setHighlightedMessages(() => {
+            const newSet = new Set<number>();
+            newSet.add(replyId);
+            return newSet;
+          });
+          
+          highlightTimeoutRef.current = setTimeout(() => {
+            setHighlightedMessages(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(replyId);
+              return newSet;
+            });
+            setFocusedMessageId(null);
+            highlightTimeoutRef.current = null;
+          }, 1500);
+        }, 100); // Небольшая задержка после прокрутки
       });
-      
-      // Remove highlight after 1.5 seconds
-      highlightTimeoutRef.current = setTimeout(() => {
-        setHighlightedMessages(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(replyId);
-          return newSet;
-        });
-        setFocusedMessageId(null);
-        highlightTimeoutRef.current = null;
-      }, 1500);
     } else {
-      // Message not in current view, load around it
+      // Загрузка around - остается без изменений
       paginationActions.setIsJumpingToMessage(true);
       paginationActions.setSkipMainQuery(true);
       
@@ -549,18 +548,26 @@ const MessageList: React.FC<MessageListProps> = (props) => {
 
   // Effect to handle scroll to message when ref changes
   useEffect(() => {
-    if (scrollToMessageIdRef.current && messages.length > 0) {
+    if (scrollToMessageIdRef.current && messages.length > 0 && messagesContainerRef.current) {
       const targetId = scrollToMessageIdRef.current;
       const messageExists = messages.some(msg => msg.id === targetId);
       
       if (messageExists) {
-        // Use virtualized scroll function
-        scrollToMessage(targetId);
-        // Clear the ref
-        scrollToMessageIdRef.current = null;
+        // Используем функцию scrollToMessage из виртуализации
+        // с задержкой для гарантии обновления DOM
+        const timeoutId = setTimeout(() => {
+          scrollToMessage(targetId);
+          
+          // Очищаем ref после успешной прокрутки
+          setTimeout(() => {
+            scrollToMessageIdRef.current = null;
+          }, 100);
+        }, 200); // Увеличенная задержка для виртуализации
+        
+        return () => clearTimeout(timeoutId);
       }
     }
-  }, [messages, scrollToMessage]);
+  }, [messages.length, scrollToMessage, virtualItems.length]);
 
   // Memoize virtual items rendering
   const virtualItemsRendered = useMemo(() => virtualItems.map(renderVirtualItem), [virtualItems, renderVirtualItem]);

@@ -53,6 +53,20 @@ export const useVirtualScroll = (
   
   // Force re-render when measurements change
   const [measurementVersion, setMeasurementVersion] = useState(0);
+  
+  // Дебаунс для обновления измерений
+  const measurementUpdateTimeoutRef = useRef<NodeJS.Timeout | undefined>();
+  
+  // Обновляем setMeasurementVersion чтобы использовать дебаунс
+  const updateMeasurements = useCallback(() => {
+    if (measurementUpdateTimeoutRef.current) {
+      clearTimeout(measurementUpdateTimeoutRef.current);
+    }
+    
+    measurementUpdateTimeoutRef.current = setTimeout(() => {
+      setMeasurementVersion(v => v + 1);
+    }, 50); // Небольшая задержка для батчинга обновлений
+  }, []);
 
   // Calculate item offsets and total size
   const { totalSize } = useMemo(() => {
@@ -225,7 +239,7 @@ export const useVirtualScroll = (
       });
       
       if (hasChanges) {
-        setMeasurementVersion(v => v + 1);
+        updateMeasurements();
         
         // Only adjust scroll position if user is not actively scrolling
         // and we're not in a state where new content is being loaded at the bottom
@@ -266,7 +280,7 @@ export const useVirtualScroll = (
       
       if (currentSize !== newSize) {
         measuredSizesRef.current.set(index, newSize);
-        setMeasurementVersion(v => v + 1);
+        updateMeasurements();
       }
       
       // Track element and observe for resize
@@ -489,10 +503,39 @@ export const useMessageVirtualization = (
       item.data.id === messageId
     );
     
-    if (messageIndex !== -1) {
-      virtualScroll.scrollToIndex(messageIndex, 'center');
+    if (messageIndex !== -1 && containerRef.current) {
+      // Сначала убедимся, что контейнер существует
+      const container = containerRef.current;
+      
+      // Используем несколько requestAnimationFrame для гарантии обновления DOM
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          // Прокручиваем к элементу
+          virtualScroll.scrollToIndex(messageIndex, 'center');
+          
+          // Дополнительная проверка и корректировка через небольшую задержку
+          setTimeout(() => {
+            // Находим реальный DOM элемент
+            const messageElement = container.querySelector(`[data-msg-id="${messageId}"]`);
+            if (messageElement) {
+              const rect = messageElement.getBoundingClientRect();
+              const containerRect = container.getBoundingClientRect();
+              
+              // Проверяем, видим ли элемент
+              const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+              
+              if (!isVisible) {
+                // Если элемент не полностью видим, прокручиваем к нему еще раз
+                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }
+          }, 100);
+        });
+      });
+    } else {
+      console.warn('Message not found in processedItems:', messageId, 'Items count:', processedItems.length);
     }
-  }, [processedItems, virtualScroll.scrollToIndex]); // Only depend on the specific function
+  }, [processedItems, virtualScroll.scrollToIndex, containerRef]);
 
   return {
     ...virtualScroll,

@@ -135,8 +135,53 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   } = useMessageSearch({
     channelId: activeChannel?.id,
     onSearchResultClick: (messageId: number) => {
-      setTargetMessageId(messageId);
-      paginationActions.setAroundMessageId(messageId);
+      // Check if message exists in current list
+      const messageExists = messages.some(msg => msg.id === messageId);
+      
+      if (messageExists) {
+        // Message is in current view, scroll to it directly
+        scrollToMessageIdRef.current = messageId;
+        
+        // Clear any existing highlights
+        setHighlightedMessages(new Set());
+        setFocusedMessageId(null);
+        
+        // Highlight the message
+        setHighlightedMessages(prev => {
+          const newSet = new Set(prev);
+          newSet.add(messageId);
+          return newSet;
+        });
+        setFocusedMessageId(messageId);
+        
+        // Remove highlight after delay
+        setTimeout(() => {
+          setHighlightedMessages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(messageId);
+            return newSet;
+          });
+          setFocusedMessageId(null);
+        }, 1500);
+      } else {
+        // Message not in current view, load around it
+        paginationActions.setIsJumpingToMessage(true);
+        paginationActions.setSkipMainQuery(true);
+        
+        // Clear previous states
+        setMessages([]);
+        setTempMessages(new Map());
+        paginationActions.setBeforeId(null);
+        paginationActions.setAfterId(null);
+        paginationActions.setHasMoreMessages(true);
+        paginationActions.setHasMoreMessagesAfter(true);
+        paginationActions.setEnableAfterPagination(true);
+        
+        // Set target message and loading mode
+        setTargetMessageId(messageId);
+        paginationActions.setAroundMessageId(messageId);
+        paginationActions.setLoadingMode('around');
+      }
     }
   });
   
@@ -497,16 +542,32 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   
   // Effect to handle target message navigation after around loading
   useEffect(() => {
+    console.log('MainChatArea effect check:', {
+      targetMessageId,
+      messagesLength: messages.length,
+      loadingMode: paginationState.loadingMode,
+      isLoadingAround
+    });
+    
     if (targetMessageId && messages.length > 0 && paginationState.loadingMode === 'around' && !isLoadingAround) {
       const targetExists = messages.some(msg => msg.id === targetMessageId);
       
-      if (targetExists) {        
+      if (targetExists) {
+        console.log('MainChatArea: Target message found after around load:', targetMessageId);
+        
         // Продолжаем блокировать пагинацию во время анимации
         isLoadingMoreRef.current = true;
         
-        // Set target message ID for MessageList to handle scrolling and highlighting
-        targetMessageIdRef.current = targetMessageId;
-        scrollToMessageIdRef.current = targetMessageId;
+        // Форсируем обновление виртуализации
+        requestAnimationFrame(() => {
+          // Устанавливаем ref для MessageList
+          scrollToMessageIdRef.current = targetMessageId;
+          
+          // Триггерим обновление через изменение состояния
+          setMessages(prev => [...prev]); // Форсируем пересчет виртуализации
+          
+          console.log('MainChatArea: Set scrollToMessageIdRef to:', targetMessageId);
+        });
         
         // Highlight the target message
         setHighlightedMessages(prev => {
@@ -528,9 +589,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         
         // Даем время DOM обновиться
         setTimeout(() => {
+          console.log('MainChatArea: Clearing target states after delay');
           // Сбрасываем состояния после прокрутки
           setTargetMessageId(null);
           targetMessageIdRef.current = null;
+          // НЕ очищаем scrollToMessageIdRef здесь - пусть MessageList сам это делает
           paginationActions.setAroundMessageId(null);
           
           // Подготавливаем пагинацию для нормальной работы после around
@@ -557,7 +620,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         }, 200);
       } 
     }
-  }, [messages, targetMessageId, paginationState.loadingMode, isLoadingAround, paginationActions, setHighlightedMessages, setFocusedMessageId]);
+  }, [messages.length, targetMessageId, paginationState.loadingMode, isLoadingAround, paginationActions, setHighlightedMessages, setFocusedMessageId, setMessages]);
 
   // Remove old auto-scroll effect - now handled in main message loading effect
 
@@ -623,6 +686,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     const tempId = Date.now();
     const replyMessage = replyingToMessageRef.current; // Use ref to get current value
     
+    // Clear the reply state immediately after capturing the value
+    setReplyingToMessage(null);
+    
     try {
       const tempMessage: ExtendedMessage = {
         id: -1, // Temporary ID
@@ -659,9 +725,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       };      
       const result = await createMessage(apiPayload).unwrap();
       
-      // Clear the reply state after successful sending
-      setReplyingToMessage(null);
-      
       // Remove the temporary message once we get confirmation
       setTempMessages(prev => {
         const newMap = new Map(prev);
@@ -690,9 +753,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         newMap.delete(String(tempId));
         return newMap;
       });
-      
-      // Clear the reply state on error
-      setReplyingToMessage(null);
       
       // Type guard for error object
       if (typeof error === 'object' && error !== null && 'status' in error && error.status === 403 && 'data' in error && typeof error.data === 'object' && error.data !== null && 'type' in error.data && error.data.type === 'ACCESS_DENIED') {

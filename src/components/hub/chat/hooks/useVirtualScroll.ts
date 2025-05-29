@@ -56,7 +56,7 @@ export const useVirtualScroll = (
   const [measurementVersion, setMeasurementVersion] = useState(0);
   
   // Дебаунс для обновления измерений
-  const measurementUpdateTimeoutRef = useRef<NodeJS.Timeout | undefined>();
+  const measurementUpdateTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   
   // Scroll correction state for pagination
   const [scrollCorrection, setScrollCorrection] = useState<{

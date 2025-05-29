@@ -34,12 +34,13 @@ const formatDateForGroup = (timestamp: string) => {
   }
   
   const isCurrentYear = date.getFullYear() === today.getFullYear();
-  return date.toLocaleDateString([], {
+  const formattedDate = date.toLocaleDateString([], {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     ...(isCurrentYear ? {} : { year: 'numeric' })
   });
+  return formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
 };
 
 const isWithinTimeThreshold = (timestamp1: string, timestamp2: string, thresholdMinutes: number = 30) => {
@@ -88,6 +89,7 @@ interface MessageListProps {
     prepareScrollCorrection: () => void;
     setDisableSmoothScroll: (value: boolean) => void;
   } | null>;
+  forceScrollToMessageId?: number | null;
 
   // Actions
   setHighlightedMessages: React.Dispatch<React.SetStateAction<Set<number>>>;
@@ -146,7 +148,8 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     setTargetMessageId,
     paginationActions,
     handleEditMessage,
-    handleDeleteMessage
+    handleDeleteMessage,
+    forceScrollToMessageId
   } = props;
 
 
@@ -363,7 +366,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
               sx={{
                 color: 'rgba(255,255,255,0.9)',
                 fontWeight: 600,
-                fontSize: '0.9rem',
+                fontSize: '0.9rem'
               }}
             >
               {formatDateForGroup(item.data as string)}
@@ -567,6 +570,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
       const messageExists = messages.some(msg => msg.id === targetId);
       
       if (messageExists) {
+        console.log('[MessageList] Scrolling to message:', targetId);
         // Используем функцию scrollToMessage из виртуализации
         // с задержкой для гарантии обновления DOM
         const timeoutId = setTimeout(() => {
@@ -581,7 +585,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         return () => clearTimeout(timeoutId);
       }
     }
-  }, [messages.length, scrollToMessage, virtualItems.length]);
+  }, [messages, scrollToMessage, virtualItems.length, forceScrollToMessageId]); // Added forceScrollToMessageId to dependencies
 
   // Memoize virtual items rendering
   const virtualItemsRendered = useMemo(() => virtualItems.map(renderVirtualItem), [virtualItems, renderVirtualItem]);

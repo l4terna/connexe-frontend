@@ -71,7 +71,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   } = useMessageState();
   
   // Использование хука пагинации
-  const { state: paginationState, actions: paginationActions, isLoadingMoreRef, lastBeforeIdRef, lastAfterIdRef } = useMessagePagination();
+  const { state: paginationState, actions: paginationActions, isLoadingMoreRef, lastBeforeIdRef, lastAfterIdRef, setLoadingWithTimeout } = useMessagePagination();
   
   // Refs должны быть объявлены до использования в хуках
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -116,6 +116,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const [messageToDelete, setMessageToDelete] = useState<number | null>(null);
   const [deleteForEveryone, setDeleteForEveryone] = useState(false);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [forceScrollToMessageId, setForceScrollToMessageId] = useState<number | null>(null);
   
   // Использование хука поиска
   const {
@@ -352,7 +353,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setShowDateLabel(false);
     setShowScrollButton(false);
     setIsScrolledToBottom(true);
-    isLoadingMoreRef.current = false;
+    setLoadingWithTimeout(false);
     lastAfterIdRef.current = null;
     lastBeforeIdRef.current = null;
     
@@ -412,7 +413,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     paginationActions.setLoadingMode('initial');
     
     // Блокируем пагинацию на время загрузки
-    isLoadingMoreRef.current = true;
+    setLoadingWithTimeout(true);
     
     // Update local state
     setUnreadMessages(new Set());
@@ -426,7 +427,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   useEffect(() => {
     if (aroundMessagesData && aroundMessagesData.length > 0 && paginationState.loadingMode === 'around') {      
       // Блокируем пагинацию на время обработки
-      isLoadingMoreRef.current = true;
+      setLoadingWithTimeout(true);
       
       const newExtendedMessages = aroundMessagesData.map(convertToExtendedMessage);
       
@@ -536,7 +537,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       setTimeout(() => {
         scrollToBottom();
         paginationActions.setLoadingMode(null); // Сбрасываем режим после обработки
-        isLoadingMoreRef.current = false; // Разблокируем пагинацию
+        setLoadingWithTimeout(false); // Разблокируем пагинацию
       }, 150);
     }
   }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationState.beforeId, paginationState.afterId, paginationActions, lastAroundId, messages.length]);
@@ -560,7 +561,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         console.log('MainChatArea: Target message found after around load:', targetMessageId);
         
         // Продолжаем блокировать пагинацию во время анимации
-        isLoadingMoreRef.current = true;
+        setLoadingWithTimeout(true);
         
         // Форсируем обновление виртуализации
         requestAnimationFrame(() => {
@@ -619,7 +620,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
             paginationActions.setIsJumpingToMessage(false);
             paginationActions.setSkipMainQuery(false);
             setDisableAutoScroll(false);
-            isLoadingMoreRef.current = false; // Разблокируем пагинацию
+            setLoadingWithTimeout(false); // Разблокируем пагинацию
           }, 300); // Уменьшенная задержка для быстрой разблокировки пагинации
         }, 200);
       } 
@@ -910,39 +911,83 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
   // Handle search result click
   const handleSearchResultClick = useCallback((message: Message) => {
-    // Set loading mode around
-    paginationActions.setLoadingMode('around');
+    // Check if message exists in current list
+    const messageExists = messages.some(msg => msg.id === message.id);
+    
+    if (messageExists) {
+      // Message is in current view, scroll to it directly
+      console.log('[Search] Message found in current view, scrolling to:', message.id);
+      
+      // Close search panel
+      clearSearch();
+      
+      // Force scroll using state to trigger re-render
+      setForceScrollToMessageId(message.id);
+      
+      // Also set the ref for backup
+      requestAnimationFrame(() => {
+        scrollToMessageIdRef.current = message.id;
+      });
+      
+      // Clear any existing highlights
+      setHighlightedMessages(new Set());
+      setFocusedMessageId(null);
+      
+      // Highlight the message
+      setHighlightedMessages(prev => {
+        const newSet = new Set(prev);
+        newSet.add(message.id);
+        return newSet;
+      });
+      setFocusedMessageId(message.id);
+      
+      // Remove highlight after delay
+      setTimeout(() => {
+        setHighlightedMessages(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(message.id);
+          return newSet;
+        });
+        setFocusedMessageId(null);
+      }, 1500);
+    } else {
+      // Message not in current view, load around it
+      console.log('[Search] Message not in current view, loading around:', message.id);
+      
+      // Set loading mode around
+      paginationActions.setLoadingMode('around');
 
-    // Block main query
-    paginationActions.setSkipMainQuery(true);
-    
-    // Block all queries
-    paginationActions.setIsJumpingToMessage(true);
-    
-    // Close search panel
-    clearSearch();
-    
-    // Block auto-scroll and pagination
-    setDisableAutoScroll(true);
-    isLoadingMoreRef.current = true; // Block pagination
-    
-    // Clear beforeId to avoid conflicts
-    paginationActions.setBeforeId(null);
-    
-    // Clear messages before loading new ones
-    // This prevents scroll issues due to message removal
-    setMessages([]);
-    setTempMessages(new Map());
-    messagesLengthRef.current = 0;
-    
-    // Clear unread message states
-    setUnreadMessages(new Set());
-    resetUnreadCounts();
-    
-    // Set target message and navigate
-    setTargetMessageId(message.id);
-    paginationActions.setAroundMessageId(message.id);
-  }, [clearSearch, paginationActions, setDisableAutoScroll, isLoadingMoreRef, setMessages, setTempMessages, messagesLengthRef, setUnreadMessages, resetUnreadCounts, setTargetMessageId]);
+      // Block main query
+      paginationActions.setSkipMainQuery(true);
+      
+      // Block all queries
+      paginationActions.setIsJumpingToMessage(true);
+      
+      // Close search panel
+      clearSearch();
+      
+      // Block auto-scroll and pagination
+      setDisableAutoScroll(true);
+      setLoadingWithTimeout(true); // Block pagination
+      
+      // Clear beforeId to avoid conflicts
+      paginationActions.setBeforeId(null);
+      
+      // Clear messages before loading new ones
+      // This prevents scroll issues due to message removal
+      setMessages([]);
+      setTempMessages(new Map());
+      messagesLengthRef.current = 0;
+      
+      // Clear unread message states
+      setUnreadMessages(new Set());
+      resetUnreadCounts();
+      
+      // Set target message and navigate
+      setTargetMessageId(message.id);
+      paginationActions.setAroundMessageId(message.id);
+    }
+  }, [messages, clearSearch, paginationActions, setDisableAutoScroll, setLoadingWithTimeout, setMessages, setTempMessages, messagesLengthRef, setUnreadMessages, resetUnreadCounts, setTargetMessageId, scrollToMessageIdRef, setHighlightedMessages, setFocusedMessageId]);
 
   // Handle scroll pagination - DISABLED because virtual scroll handles it
   // useEffect(() => {
@@ -1009,11 +1054,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Handle pagination loading
   useEffect(() => {
     if (messagesData && messagesData.length > 0 && paginationState.beforeId !== null && paginationState.afterId === null && paginationState.loadingMode === 'pagination' && !isLoading && !isFetching) {
+      try {
       // Проверяем, что данные действительно соответствуют запросу
       const firstMessageId = messagesData[0]?.id;
       if (firstMessageId && firstMessageId >= paginationState.beforeId) {
         // Сбрасываем состояние пагинации при ошибке
-        isLoadingMoreRef.current = false;
+        setLoadingWithTimeout(false);
         paginationActions.setLoadingMode(null);
         paginationActions.setBeforeId(null);
         return;
@@ -1074,15 +1120,21 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         if (scrollCorrectionRef.current) {
           scrollCorrectionRef.current.setDisableSmoothScroll(false);
         }
-        isLoadingMoreRef.current = false;
+        setLoadingWithTimeout(false);
         paginationActions.setLoadingMode(null);
       }, 100);
+      } catch (error) {
+        console.error('Error in pagination loading (before):', error);
+        setLoadingWithTimeout(false);
+        paginationActions.setLoadingMode(null);
+      }
     }
-  }, [messagesData, paginationState.beforeId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions]);
+  }, [messagesData, paginationState.beforeId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions, setLoadingWithTimeout]);
 
   // Handle pagination loading for after (scroll down)
   useEffect(() => {
     if (messagesData && messagesData.length > 0 && paginationState.afterId !== null && paginationState.beforeId === null && paginationState.loadingMode === 'pagination' && !isLoading && !isFetching) {
+      try {
       // Проверяем, что данные действительно соответствуют запросу
       // При after запросе первое сообщение должно иметь ID больше afterId
       let dataToProcess = messagesData;
@@ -1095,7 +1147,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           // Если нет новых сообщений, значит мы достигли конца
           paginationActions.setHasMoreMessagesAfter(false);
           paginationActions.setEnableAfterPagination(false);
-          isLoadingMoreRef.current = false;
+          setLoadingWithTimeout(false);
           paginationActions.setLoadingMode(null);
           paginationActions.setAfterId(null);
           lastAfterIdRef.current = null;
@@ -1108,7 +1160,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       const container = messagesContainerRef.current;
       if (!container) {
-        isLoadingMoreRef.current = false;
+        setLoadingWithTimeout(false);
         paginationActions.setLoadingMode(null);
         return;
       }
@@ -1156,7 +1208,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // For scroll down pagination, we don't need to adjust scroll position
       // Messages are added at the bottom, so scroll position naturally stays the same
       requestAnimationFrame(() => {
-        isLoadingMoreRef.current = false;
+        setLoadingWithTimeout(false);
         paginationActions.setLoadingMode(null);
         // Сбрасываем afterId если достигли конца
         if (!paginationState.hasMoreMessagesAfter) {
@@ -1164,8 +1216,13 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
           lastAfterIdRef.current = null;
         }
       });
+      } catch (error) {
+        console.error('Error in pagination loading (after):', error);
+        setLoadingWithTimeout(false);
+        paginationActions.setLoadingMode(null);
+      }
     }
-  }, [messagesData, paginationState.afterId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions, paginationState.hasMoreMessagesAfter, lastAfterIdRef]);
+  }, [messagesData, paginationState.afterId, convertToExtendedMessage, paginationState.loadingMode, isLoading, isFetching, paginationActions, paginationState.hasMoreMessagesAfter, lastAfterIdRef, setLoadingWithTimeout]);
 
 
   // Messages rendering logic has been moved to the MessageList component
@@ -1279,6 +1336,19 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         resetUnreadCounts();
     }
   }, [isScrolledToBottom, newMessagesCount, resetUnreadCounts]);
+
+  // Effect to handle forced scroll to message
+  useEffect(() => {
+    if (forceScrollToMessageId !== null) {
+      console.log('[MainChatArea] Force scroll to message:', forceScrollToMessageId);
+      scrollToMessageIdRef.current = forceScrollToMessageId;
+      
+      // Clear the force scroll state after a short delay
+      setTimeout(() => {
+        setForceScrollToMessageId(null);
+      }, 100);
+    }
+  }, [forceScrollToMessageId]);
 
   // Handle search mode changes
   useEffect(() => {
@@ -1410,6 +1480,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       handleEditMessage={handleEditMessage}
       handleDeleteMessage={handleDeleteMessage}
       scrollCorrectionRef={scrollCorrectionRef}
+      forceScrollToMessageId={forceScrollToMessageId}
     />
   );
 

@@ -117,12 +117,13 @@ export const useMessageScroll = ({
     }
     
     const isCurrentYear = date.getFullYear() === today.getFullYear();
-    return date.toLocaleDateString([], {
+    const formattedDate = date.toLocaleDateString([], {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
       ...(isCurrentYear ? {} : { year: 'numeric' })
     });
+    return formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
   };
 
   // Effect to track scroll position and handle scroll events

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { ExtendedMessage } from '../types/message';
 
 export type LoadingMode = 'initial' | 'pagination' | 'around' | null;
@@ -40,6 +40,7 @@ export interface UseMessagePaginationReturn {
   isLoadingMoreRef: React.MutableRefObject<boolean>;
   lastBeforeIdRef: React.MutableRefObject<number | null>;
   lastAfterIdRef: React.MutableRefObject<number | null>;
+  setLoadingWithTimeout: (loading: boolean) => void;
 }
 
 export const useMessagePagination = (): UseMessagePaginationReturn => {
@@ -58,6 +59,30 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
   const isLoadingMoreRef = useRef(false);
   const lastBeforeIdRef = useRef<number | null>(null);
   const lastAfterIdRef = useRef<number | null>(null);
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper function to set loading state with safety timeout
+  const setLoadingWithTimeout = useCallback((loading: boolean) => {
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+
+    isLoadingMoreRef.current = loading;
+    
+    if (loading) {
+      console.log('[Pagination] Setting loading state to true');
+      // Set a safety timeout to reset loading state after 10 seconds
+      loadingTimeoutRef.current = setTimeout(() => {
+        console.warn('[Pagination] Loading timeout - resetting loading state after 10 seconds');
+        isLoadingMoreRef.current = false;
+        setLoadingMode(null);
+        loadingTimeoutRef.current = null;
+      }, 10000);
+    } else {
+      console.log('[Pagination] Setting loading state to false');
+    }
+  }, []);
 
   const handleScrollPagination = useCallback((
     container: HTMLElement,
@@ -73,6 +98,14 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     // Блокируем только если идет загрузка (isLoadingMoreRef) или если loadingMode это 'initial' или 'around'
     const isPaginationBlocked = isLoadingMoreRef.current || loadingMode === 'initial' || loadingMode === 'around';
     
+    if (isPaginationBlocked && process.env.NODE_ENV === 'development') {
+      console.log('[Pagination] Pagination blocked:', {
+        isLoadingMore: isLoadingMoreRef.current,
+        loadingMode,
+        isJumpingToMessage
+      });
+    }
+    
     // Вычисляем расстояние до низа
     const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     
@@ -85,7 +118,8 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
         messages.length > 0) {
       // Only load more if we have messages
       if (messages.length >= messagesPerPage) {
-        isLoadingMoreRef.current = true;
+        console.log('[Pagination] Loading more messages (scroll up)');
+        setLoadingWithTimeout(true);
         setLoadingMode('pagination');
         
         // Get the ID of the oldest message in the current view
@@ -93,6 +127,7 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
         const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
         const oldestMessage = sortedMsgs[0]; // Первое сообщение в отсортированном массиве
         if (oldestMessage && lastBeforeIdRef.current !== oldestMessage.id) {
+          console.log('[Pagination] Setting beforeId:', oldestMessage.id);
           setBeforeId(oldestMessage.id);
           lastBeforeIdRef.current = oldestMessage.id;
           // Очищаем afterId чтобы избежать конфликтов
@@ -113,7 +148,7 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     // Загружаем больше сообщений когда до низа остается меньше 40% от общей высоты
     if (scrollPercentFromBottom < 40 && !isPaginationBlocked && hasMoreMessagesAfter && enableAfterPagination && messages.length > 0) {        
       if (messages.length > 0) {
-        isLoadingMoreRef.current = true;
+        setLoadingWithTimeout(true);
         setLoadingMode('pagination');
         
         // Get the ID of the newest message in the current view
@@ -137,7 +172,8 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     loadingMode,
     hasMoreMessages,
     hasMoreMessagesAfter,
-    enableAfterPagination
+    enableAfterPagination,
+    setLoadingWithTimeout
   ]);
 
   const resetPagination = useCallback(() => {
@@ -150,10 +186,10 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     setSkipMainQuery(false);
     setIsJumpingToMessage(false);
     setAroundMessageId(null);
-    isLoadingMoreRef.current = false;
+    setLoadingWithTimeout(false);
     lastBeforeIdRef.current = null;
     lastAfterIdRef.current = null;
-  }, []);
+  }, [setLoadingWithTimeout]);
 
   const jumpToMessage = useCallback((messageId: number) => {
     setIsJumpingToMessage(true);
@@ -165,7 +201,16 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     setAfterId(null);
     lastBeforeIdRef.current = null;
     lastAfterIdRef.current = null;
-    isLoadingMoreRef.current = false;
+    setLoadingWithTimeout(false);
+  }, [setLoadingWithTimeout]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
   }, []);
 
   const state: MessagePaginationState = useMemo(() => ({
@@ -215,5 +260,6 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     isLoadingMoreRef,
     lastBeforeIdRef,
     lastAfterIdRef,
+    setLoadingWithTimeout,
   };
 };

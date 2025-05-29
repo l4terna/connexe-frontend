@@ -570,8 +570,6 @@ const MessageList: React.FC<MessageListProps> = (props) => {
       const messageExists = messages.some(msg => msg.id === targetId);
       
       if (messageExists) {
-        console.log('[MessageList] Scrolling to message:', targetId);
-        // Используем функцию scrollToMessage из виртуализации
         // с задержкой для гарантии обновления DOM
         const timeoutId = setTimeout(() => {
           scrollToMessage(targetId);
@@ -603,6 +601,9 @@ const MessageList: React.FC<MessageListProps> = (props) => {
           position: 'relative',
           overflowY: 'auto',
           scrollBehavior: disableSmoothScroll ? 'auto' : 'smooth',
+          // Скрываем контент пока идет initial загрузка чтобы избежать мерцания
+          opacity: paginationState.loadingMode === 'initial' ? 0 : 1,
+          transition: 'opacity 0.2s ease-in-out',
           '&::-webkit-scrollbar': {
             width: '8px',
           },
@@ -634,6 +635,9 @@ const MessageList: React.FC<MessageListProps> = (props) => {
         position: 'relative',
         overflowY: 'auto',
         scrollBehavior: disableSmoothScroll ? 'auto' : 'smooth',
+        // Скрываем контент пока идет initial загрузка чтобы избежать мерцания
+        opacity: paginationState.loadingMode === 'initial' && messages.length === 0 ? 0 : 1,
+        transition: 'opacity 0.2s ease-in-out',
         '&::-webkit-scrollbar': {
           width: '8px',
         },

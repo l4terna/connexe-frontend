@@ -20,7 +20,7 @@ interface UseMessageScrollReturn {
   setCurrentDateLabel: (value: string | null) => void;
   disableAutoScroll: boolean;
   setDisableAutoScroll: (value: boolean) => void;
-  scrollToBottom: () => void;
+  scrollToBottom: (instant?: boolean) => void;
   scrollToMessage: (messageId: number) => void;
   handleScrollToBottom: () => void;
 }
@@ -42,11 +42,38 @@ export const useMessageScroll = ({
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Function to scroll to bottom
-  const scrollToBottom = useCallback(() => {
-    if (messagesContainerRef.current && !disableAutoScroll) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-      setShowScrollButton(false);
+  const scrollToBottom = useCallback((instant: boolean = false) => {
+    if (!messagesContainerRef.current) {
+      return;
     }
+    
+    if (disableAutoScroll) {
+      return;
+    }
+    
+    const container = messagesContainerRef.current;
+    
+    // Use requestAnimationFrame to ensure DOM is updated
+    requestAnimationFrame(() => {
+      if (instant) {
+        // Temporarily disable smooth scrolling for instant positioning
+        const originalScrollBehavior = container.style.scrollBehavior;
+        container.style.scrollBehavior = 'auto';
+        container.scrollTop = container.scrollHeight;
+        // Restore original scroll behavior
+        container.style.scrollBehavior = originalScrollBehavior;
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+      setShowScrollButton(false);
+      
+      // Double-check after a short delay
+      setTimeout(() => {
+        if (container.scrollTop < container.scrollHeight - container.clientHeight - 100) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }, 100);
+    });
   }, [disableAutoScroll, messagesContainerRef]);
 
   // Function to scroll to a specific message and highlight it

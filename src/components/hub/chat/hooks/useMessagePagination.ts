@@ -32,6 +32,8 @@ export interface MessagePaginationActions {
   ) => void;
   resetPagination: () => void;
   jumpToMessage: (messageId: number) => void;
+  setInitialLoadComplete: (complete: boolean) => void;
+  clearAfterPaginationCooldown: () => void;
 }
 
 export interface UseMessagePaginationReturn {
@@ -60,6 +62,8 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
   const lastBeforeIdRef = useRef<number | null>(null);
   const lastAfterIdRef = useRef<number | null>(null);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const initialLoadCompleteRef = useRef(false);
+  const afterPaginationCooldownRef = useRef(false);
 
   // Helper function to set loading state with safety timeout
   const setLoadingWithTimeout = useCallback((loading: boolean) => {
@@ -71,7 +75,6 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     isLoadingMoreRef.current = loading;
     
     if (loading) {
-      console.log('[Pagination] Setting loading state to true');
       // Set a safety timeout to reset loading state after 10 seconds
       loadingTimeoutRef.current = setTimeout(() => {
         console.warn('[Pagination] Loading timeout - resetting loading state after 10 seconds');
@@ -79,9 +82,7 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
         setLoadingMode(null);
         loadingTimeoutRef.current = null;
       }, 10000);
-    } else {
-      console.log('[Pagination] Setting loading state to false');
-    }
+    } 
   }, []);
 
   const handleScrollPagination = useCallback((
@@ -96,16 +97,7 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     
     // Проверяем наличие флагов блокировки пагинации
     // Блокируем только если идет загрузка (isLoadingMoreRef) или если loadingMode это 'initial' или 'around'
-    const isPaginationBlocked = isLoadingMoreRef.current || loadingMode === 'initial' || loadingMode === 'around';
-    
-    if (isPaginationBlocked && process.env.NODE_ENV === 'development') {
-      console.log('[Pagination] Pagination blocked:', {
-        isLoadingMore: isLoadingMoreRef.current,
-        loadingMode,
-        isJumpingToMessage
-      });
-    }
-    
+    const isPaginationBlocked = isLoadingMoreRef.current || loadingMode === 'initial' || loadingMode === 'around' || !initialLoadCompleteRef.current;
     // Вычисляем расстояние до низа
     const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     
@@ -118,7 +110,6 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
         messages.length > 0) {
       // Only load more if we have messages
       if (messages.length >= messagesPerPage) {
-        console.log('[Pagination] Loading more messages (scroll up)');
         setLoadingWithTimeout(true);
         setLoadingMode('pagination');
         
@@ -127,7 +118,6 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
         const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
         const oldestMessage = sortedMsgs[0]; // Первое сообщение в отсортированном массиве
         if (oldestMessage && lastBeforeIdRef.current !== oldestMessage.id) {
-          console.log('[Pagination] Setting beforeId:', oldestMessage.id);
           setBeforeId(oldestMessage.id);
           lastBeforeIdRef.current = oldestMessage.id;
           // Очищаем afterId чтобы избежать конфликтов
@@ -146,7 +136,7 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     const scrollPercentFromBottom = (scrollBottom / container.scrollHeight) * 100;
     
     // Загружаем больше сообщений когда до низа остается меньше 40% от общей высоты
-    if (scrollPercentFromBottom < 40 && !isPaginationBlocked && hasMoreMessagesAfter && enableAfterPagination && messages.length > 0) {        
+    if (scrollPercentFromBottom < 40 && !isPaginationBlocked && !afterPaginationCooldownRef.current && hasMoreMessagesAfter && enableAfterPagination && messages.length > 0) {        
       if (messages.length > 0) {
         setLoadingWithTimeout(true);
         setLoadingMode('pagination');
@@ -164,6 +154,13 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
           lastBeforeIdRef.current = null;
           // Сбрасываем skipMainQuery чтобы запрос мог отправиться
           setSkipMainQuery(false);
+          
+          // Устанавливаем кулдаун для предотвращения повторной пагинации
+          afterPaginationCooldownRef.current = true;
+        } else if (newestMessage) {
+          // Если это дубликат запроса, сбрасываем состояние загрузки
+          setLoadingWithTimeout(false);
+          setLoadingMode(null);
         }
       }
     }
@@ -189,6 +186,8 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     setLoadingWithTimeout(false);
     lastBeforeIdRef.current = null;
     lastAfterIdRef.current = null;
+    initialLoadCompleteRef.current = false; // Reset initial load flag
+    afterPaginationCooldownRef.current = false; // Reset cooldown flag
   }, [setLoadingWithTimeout]);
 
   const jumpToMessage = useCallback((messageId: number) => {
@@ -203,6 +202,14 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     lastAfterIdRef.current = null;
     setLoadingWithTimeout(false);
   }, [setLoadingWithTimeout]);
+  
+  const setInitialLoadComplete = useCallback((complete: boolean) => {
+    initialLoadCompleteRef.current = complete;
+  }, []);
+  
+  const clearAfterPaginationCooldown = useCallback(() => {
+    afterPaginationCooldownRef.current = false;
+  }, []);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -248,10 +255,14 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     handleScrollPagination,
     resetPagination,
     jumpToMessage,
+    setInitialLoadComplete,
+    clearAfterPaginationCooldown,
   }), [
     handleScrollPagination,
     resetPagination,
-    jumpToMessage
+    jumpToMessage,
+    setInitialLoadComplete,
+    clearAfterPaginationCooldown
   ]);
 
   return {

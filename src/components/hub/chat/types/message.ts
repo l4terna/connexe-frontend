@@ -15,7 +15,7 @@ export interface Message {
   };
   created_at: string;
   last_modified_at?: string;
-  attachments: any[];
+  attachments: string[];
   read_by_count?: number;
   reply?: Message;
 }

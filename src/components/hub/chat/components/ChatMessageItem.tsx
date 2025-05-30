@@ -1,30 +1,41 @@
 import React, { useState } from 'react';
-import { Box, Typography, IconButton, Tooltip, Fade } from '@mui/material';
+import { Box, Typography, IconButton, Tooltip, Fade, Modal } from '@mui/material';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import ReplyIcon from '@mui/icons-material/Reply';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ZoomInIcon from '@mui/icons-material/ZoomIn';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import CloseIcon from '@mui/icons-material/Close';
 import UserAvatar from '../../../UserAvatar';
 import DOMPurify from 'dompurify';
 import { ExtendedMessage } from '../types/message';
+import SimpleMediaImage from './SimpleMediaImage';
+import MessageImagePreviewModal from './MessageImagePreviewModal';
 
-interface ChatMessageItemProps {
+export interface ChatMessageItemProps {
   message: ExtendedMessage;
-  isFirstOfGroup: boolean;
-  isTempMessage: boolean;
-  isHighlighted: boolean;
-  isUnread: boolean;
-  isFocused: boolean;
-  isSearchMode: boolean;
-  searchQuery: string;
+  // Support both naming conventions for backward compatibility
+  isFirstInGroup?: boolean;
+  isFirstOfGroup?: boolean;
+  isLastInGroup?: boolean;
+  // Original props
+  isTempMessage?: boolean;
+  isHighlighted?: boolean;
+  isUnread?: boolean;
+  isFocused?: boolean;
+  isSearchMode?: boolean;
+  searchQuery?: string;
   currentUserId: number;
-  hubId: number;
-  onReply: (message: ExtendedMessage) => void;
-  onEdit: (messageId: number) => void;
-  onDelete: (messageId: number) => void;
-  onReplyClick: (replyId: number) => void;
-  onMouseEnter?: (event: React.MouseEvent<HTMLDivElement>, message: ExtendedMessage) => void;
-  onMouseLeave?: () => void;
+  hubId?: number;
+  // Callback handlers
+  onReply?: (message: ExtendedMessage) => void;
+  onEdit?: (message: ExtendedMessage | number) => void;
+  onDelete?: (message: ExtendedMessage | number) => void;
+  onReplyClick?: (replyId: number) => void;
+  onMouseEnter?: (event: React.MouseEvent<HTMLDivElement>, message?: ExtendedMessage) => void;
+  onMouseLeave?: (event?: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 const formatMessageTime = (timestamp: string) => {
@@ -36,234 +47,909 @@ const formatMessageTime = (timestamp: string) => {
   });
 };
 
-const ChatMessageItem = React.memo<ChatMessageItemProps>(({
-  message,
-  isFirstOfGroup,
-  isTempMessage,
-  isHighlighted,
-  isUnread,
-  isFocused,
-  isSearchMode,
-  searchQuery,
-  currentUserId,
-  hubId,
-  onReply,
-  onEdit,
-  onDelete,
-  onReplyClick,
-  onMouseEnter,
-  onMouseLeave,
-}) => {
+export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
+  const { 
+    message, 
+    // Support both naming conventions
+    isFirstInGroup = props.isFirstOfGroup || false,
+    isLastInGroup,
+    // Original props
+    isTempMessage = false,
+    isHighlighted = false,
+    isUnread = false,
+    isFocused = false,
+    isSearchMode = false,
+    searchQuery = '',
+    currentUserId,
+    hubId = 0,
+    // Callback handlers
+    onReply,
+    onEdit,
+    onDelete,
+    onReplyClick,
+    onMouseEnter,
+    onMouseLeave
+  } = props;
+
   const [isHovered, setIsHovered] = useState(false);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  
+  // Check if message has image attachments
+  const hasAttachments = message.attachments && message.attachments.length > 0;
+  
+  // Debug logging
+  console.log('ChatMessageItem render:', {
+    messageId: message.id,
+    attachments: message.attachments,
+    attachmentsLength: message.attachments?.length,
+    hasAttachments,
+    attachmentsType: typeof message.attachments,
+    isArray: Array.isArray(message.attachments)
+  });
+  
+  // Handle image preview click
+  const handleImageClick = (storageKey: string, index: number) => {
+    setViewingImage(storageKey);
+    setCurrentImageIndex(index);
+  };
+  
+  // Handle next/previous image in the lightbox
+  const handleNextImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!message.attachments) return;
+    
+    const nextIndex = (currentImageIndex + 1) % message.attachments.length;
+    setCurrentImageIndex(nextIndex);
+    setViewingImage(message.attachments[nextIndex]);
+  };
+  
+  const handlePrevImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!message.attachments) return;
+    
+    const prevIndex = (currentImageIndex - 1 + message.attachments.length) % message.attachments.length;
+    setCurrentImageIndex(prevIndex);
+    setViewingImage(message.attachments[prevIndex]);
+  };
+
+  // Support different callback patterns
+  const handleReplyClick = () => {
+    if (onReply) {
+      onReply(message);
+    }
+  };
+
+  const handleEditClick = () => {
+    if (onEdit) {
+      // Support both new and old callback patterns
+      if (typeof onEdit === 'function') {
+        onEdit(message.id);
+      }
+    }
+  };
+
+  const handleDeleteClick = () => {
+    if (onDelete) {
+      // Support both new and old callback patterns
+      if (typeof onDelete === 'function') {
+        onDelete(message.id);
+      }
+    }
+  };
+
+  const handleReplyToClick = () => {
+    if (message.reply) {
+      if (onReplyClick && message.reply.id) {
+        onReplyClick(message.reply.id);
+      } else if (onReply) {
+        onReply(message.reply as ExtendedMessage);
+      }
+    }
+  };
+
   return (
-    <Box
-      id={`message-${message.id}`}
-      className="message-item"
-      data-date={message.created_at}
-      data-msg-id={message.id.toString()}
-      onMouseEnter={(e) => {
-        if (!isTempMessage) {
+    <>
+      <Box
+        id={`message-${message.id}`}
+        className="message-item"
+        data-date={message.created_at}
+        data-msg-id={message.id.toString()}
+        onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
           setIsHovered(true);
-          onMouseEnter?.(e, message);
-        }
-      }}
-      onMouseLeave={() => {
-        if (!isTempMessage) {
+          if (onMouseEnter) onMouseEnter(e, message);
+        }}
+        onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
           setIsHovered(false);
-          onMouseLeave?.();
-        }
-      }}
-      sx={{
-        display: 'flex',
-        gap: 2,
-        alignItems: 'flex-start',
-        position: 'relative',
-        borderRadius: '10px',
-        transition: 'background-color 0.3s ease, box-shadow 0.5s ease',
-        opacity: isTempMessage ? 0.6 : 1,
-        backgroundColor: isFocused
-          ? 'rgba(0, 207, 255, 0.25)' // Bright blue highlight for focused message (reply source)
-          : isHighlighted
-            ? 'rgba(33, 150, 243, 0.25)' // Bright blue highlight for search results
-            : isUnread
-              ? 'rgba(25,118,210,0.1)' // Blue for unread messages
-              : 'transparent',
-        '&.highlight-pulse': {
-          animation: 'pulse 2s infinite',
-        },
-        '&:hover': {
+          if (onMouseLeave) onMouseLeave(e);
+        }}
+        sx={{
+          display: 'flex',
+          gap: 2,
+          alignItems: 'flex-start',
+          position: 'relative',
+          borderRadius: '10px',
+          transition: 'background-color 0.3s ease, box-shadow 0.5s ease',
+          opacity: isTempMessage ? 0.6 : 1,
+          mt: isFirstInGroup ? 2 : 0,
           backgroundColor: isFocused
-            ? 'rgba(0, 207, 255, 0.35)'
+            ? 'rgba(0, 207, 255, 0.25)' // Bright blue highlight for focused message (reply source)
             : isHighlighted
-              ? 'rgba(33, 150, 243, 0.35)'
-              : isUnread 
-                ? 'rgba(25,118,210,0.15)' 
-                : 'rgba(255,255,255,0.05)',
-        },
-      }}
-    >
-      {/* Message Actions - positioned relative to the entire message */}
-      <Fade in={isHovered && !isTempMessage} timeout={200}>
-        <Box
-          sx={{
-            position: 'absolute',
-            top: -40,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            gap: 0.5,
-            zIndex: 10,
-            background: 'rgba(20,20,35,0.95)',
-            borderRadius: 2,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3), 0 0 8px rgba(149,128,255,0.2)',
-            px: 1,
-            py: 0.5,
-            border: '1px solid rgba(149,128,255,0.25)',
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <Tooltip title="Ответить" enterDelay={1000} placement="top">
-            <IconButton 
-              size="small" 
-              onClick={() => onReply?.(message)}
-              sx={{ 
-                color: '#00FFBA', 
-                transition: 'all 0.2s ease',
-                padding: '4px',
-                backgroundColor: 'rgba(0, 255, 186, 0.12)',
-                '&:hover': { 
-                  color: '#00FFBA',
-                  backgroundColor: 'rgba(0, 255, 186, 0.25)',
-                  transform: 'scale(1.1)',
-                } 
-              }}
-            >
-              <ReplyIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          
-          {message.author.id === currentUserId && (
-            <Tooltip title="Редактировать" enterDelay={1000} placement="top">
+              ? 'rgba(33, 150, 243, 0.25)' // Bright blue highlight for search results
+              : isUnread
+                ? 'rgba(25,118,210,0.1)' // Blue for unread messages
+                : 'transparent',
+          '&.highlight-pulse': {
+            animation: 'pulse 2s infinite',
+          },
+          '&:hover': {
+            backgroundColor: isFocused
+              ? 'rgba(0, 207, 255, 0.35)'
+              : isHighlighted
+                ? 'rgba(33, 150, 243, 0.35)'
+                : isUnread 
+                  ? 'rgba(25,118,210,0.15)' 
+                  : 'rgba(255,255,255,0.05)',
+          },
+        }}
+      >
+        {/* Message Actions - positioned relative to the entire message */}
+        <Fade in={isHovered} timeout={200}>
+          <Box
+            sx={{
+              position: 'absolute',
+              top: -40,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              gap: 0.5,
+              zIndex: 10,
+              padding: '6px 8px',
+              borderRadius: '20px',
+              background: 'rgba(40, 44, 52, 0.85)',
+              backdropFilter: 'blur(6px)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <Tooltip title="Ответить" enterDelay={1000} placement="top">
               <IconButton 
                 size="small" 
-                onClick={() => onEdit?.(message.id)}
+                onClick={handleReplyClick}
                 sx={{ 
                   color: '#00CFFF', 
                   transition: 'all 0.2s ease',
-                  padding: '4px',
-                  backgroundColor: 'rgba(0, 207, 255, 0.12)',
-                  '&:hover': { 
-                    color: '#00CFFF',
-                    backgroundColor: 'rgba(0, 207, 255, 0.25)',
-                    transform: 'scale(1.1)',
-                  } 
-                }}
-              >
-                <EditIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-          
-          <Tooltip title="Удалить" enterDelay={1000} placement="top">
-            <IconButton 
-              size="small" 
-              onClick={() => onDelete?.(message.id)}
-              sx={{ 
-                color: '#FF3D71', 
-                transition: 'all 0.2s ease',
-                padding: '4px',
-                backgroundColor: 'rgba(255, 61, 113, 0.12)',
-                '&:hover': { 
-                  color: '#FF3D71',
-                  backgroundColor: 'rgba(255, 61, 113, 0.25)',
-                  transform: 'scale(1.1)',
-                } 
-              }}
-            >
-              <DeleteIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Fade>
-      <Box 
-        sx={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          alignItems: 'center', 
-          justifyContent: 'flex-start', 
-          width: 40,
-          ml: 1,
-          mt: 1,
-        }}
-      >
-        {isFirstOfGroup ? (
-          <div
-            style={{ cursor: 'pointer' }}
-          >
-            <UserAvatar 
-              src={message.author.avatar || undefined} 
-              alt={message.author.login} 
-              userId={message.author.id}
-              hubId={hubId}
-            />
-          </div>
-        ) : null}
-      </Box>
-      <Box sx={{ flex: 1, position: 'relative' }}>
-        <Box sx={{ maxWidth: '100%' }}>
-          <Box sx={{ py: '5px', px: '0px', pl: 0 }}>
-            {isFirstOfGroup && (
-              <Typography sx={{ color: '#00CFFF', fontWeight: 700, mb: 0.5, fontSize: '1rem', letterSpacing: 0.2 }}>
-                {message.author.login}
-              </Typography>
-            )}
-            {message.reply && (
-              <Box 
-                sx={{ 
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 1,
-                  mb: 1,
-                  cursor: 'pointer',
-                  p: '4px 8px',
-                  width: '100%',
-                  ml: -1,
-                  mr: -1,
-                  borderRadius: 1,
-                  backgroundColor: 'rgba(0, 207, 255, 0.05)',
-                  borderLeft: '3px solid #00CFFF',
                   '&:hover': {
-                    backgroundColor: 'rgba(0, 207, 255, 0.1)'
+                    color: '#E5FBFF',
+                    transform: 'scale(1.1)',
                   }
                 }}
-                onClick={() => onReplyClick(message.reply!.id)}
               >
-                <ReplyIcon sx={{ color: '#00CFFF', fontSize: '0.85rem', mt: '2px' }} />
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography sx={{ color: '#00CFFF', fontWeight: 600, fontSize: '0.75rem', mb: 0.25 }}>
-                    {message.reply.author.login}
-                  </Typography>
-                  <Typography 
+                <ReplyIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            
+            {message.author.id === currentUserId && (
+              <>
+                <Tooltip title="Редактировать" enterDelay={1000} placement="top">
+                  <IconButton 
+                    size="small" 
+                    onClick={handleEditClick}
                     sx={{ 
-                      color: 'rgba(255,255,255,0.6)', 
-                      fontSize: '0.75rem',
+                      color: '#00CFFF', 
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        color: '#E5FBFF',
+                        transform: 'scale(1.1)',
+                      }
+                    }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                
+                <Tooltip title="Удалить" enterDelay={1000} placement="top">
+                  <IconButton 
+                    size="small" 
+                    onClick={handleDeleteClick}
+                    sx={{ 
+                      color: '#FF3D71', 
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        color: '#FF708D',
+                        transform: 'scale(1.1)',
+                      }
+                    }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </>
+            )}
+          </Box>
+        </Fade>
+        
+        {/* Avatar column */}
+        <Box
+          sx={{
+            width: 40,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            mt: 1,
+          }}
+        >
+          {isFirstInGroup ? (
+            <div style={{ cursor: 'pointer' }}>
+              <UserAvatar 
+                src={message.author.avatar || undefined} 
+                alt={message.author.login} 
+                userId={message.author.id}
+                hubId={hubId}
+              />
+            </div>
+          ) : null}
+        </Box>
+        
+        {/* Message content */}
+        <Box sx={{ flex: 1, position: 'relative' }}>
+          <Box sx={{ maxWidth: '100%' }}>
+            <Box sx={{ py: '5px', px: '0px', pl: 0 }}>
+              {isFirstInGroup && (
+                <Typography sx={{ color: '#00CFFF', fontWeight: 700, mb: 0.5, fontSize: '1rem', letterSpacing: 0.2 }}>
+                  {message.author.login}
+                </Typography>
+              )}
+              
+              {/* Reply reference */}
+              {message.reply && (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    gap: 1,
+                    mt: 0.5,
+                    mb: 1.5,
+                    py: 1,
+                    px: 1.5,
+                    backgroundColor: 'rgba(0, 207, 255, 0.05)',
+                    borderLeft: '3px solid #00CFFF',
+                    borderRadius: '0 5px 5px 0',
+                    fontSize: '0.95rem',
+                    maxWidth: '98%',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s ease',
+                    '&:hover': {
+                      backgroundColor: 'rgba(0, 207, 255, 0.1)'
+                    }
+                  }}
+                  onClick={handleReplyToClick}
+                >
+                  <ReplyIcon sx={{ color: '#00CFFF', fontSize: '0.85rem', mt: '2px' }} />
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography sx={{ 
+                      color: '#00CFFF', 
+                      fontWeight: 500,
+                      fontSize: '0.85rem',
+                      mb: 0.5
+                    }}>
+                      {message.reply.author.login}
+                    </Typography>
+                    <Typography sx={{ 
+                      color: 'rgba(255,255,255,0.7)', 
+                      fontSize: '0.85rem',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       display: '-webkit-box',
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical'
-                    }}
-                  >
-                    {message.reply.content}
-                  </Typography>
+                    }}>
+                      {message.reply.content}
+                    </Typography>
+                  </Box>
                 </Box>
-              </Box>
-            )}
-            <Box sx={{ 
-              display: 'flex', 
-              flexDirection: 'column',
-              position: 'relative'
-            }}>
+              )}
+            </Box>
+          </Box>
+          
+          {/* Modern Image Gallery */}
+          {hasAttachments && (
+            <Box sx={{ mt: 1.5, mb: 1 }}>
+              {(() => {
+                const count = message.attachments?.length || 0;
+                
+                // Single image - large display
+                if (count === 1) {
+                  return (
+                    <Box 
+                      sx={{
+                        position: 'relative',
+                        borderRadius: 3,
+                        overflow: 'hidden',
+                        maxWidth: '450px',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                        background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        '&:hover': {
+                          transform: 'translateY(-4px)',
+                          boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+                          border: '1px solid rgba(0, 207, 255, 0.3)',
+                          '& .zoom-overlay': { opacity: 1 },
+                          '& .attachment-image': { transform: 'scale(1.03)' }
+                        }
+                      }}
+                      onClick={() => handleImageClick(message.attachments[0], 0)}
+                    >
+                      <SimpleMediaImage
+                        storageKey={message.attachments[0]}
+                        className="attachment-image"
+                        alt="Attachment"
+                        sx={{
+                          width: '100%',
+                          height: 'auto',
+                          maxHeight: '400px',
+                          objectFit: 'cover',
+                          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        }}
+                      />
+                      <Box
+                        className="zoom-overlay"
+                        sx={{
+                          position: 'absolute',
+                          inset: 0,
+                          background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: 0,
+                          transition: 'opacity 0.3s ease',
+                          backdropFilter: 'blur(3px)',
+                        }}
+                      >
+                        <ZoomInIcon sx={{ 
+                          color: 'white', 
+                          fontSize: '36px',
+                          filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))'
+                        }} />
+                      </Box>
+                    </Box>
+                  );
+                }
+                
+                // Two images - side by side
+                if (count === 2) {
+                  return (
+                    <Box sx={{ display: 'flex', gap: 1, maxWidth: '450px' }}>
+                      {message.attachments.map((attachment: string, index: number) => (
+                        <Box 
+                          key={index}
+                          sx={{
+                            position: 'relative',
+                            borderRadius: 2.5,
+                            overflow: 'hidden',
+                            flex: 1,
+                            height: '200px',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            '&:hover': {
+                              transform: 'translateY(-2px) scale(1.02)',
+                              boxShadow: '0 12px 32px rgba(0,0,0,0.15)',
+                              border: '1px solid rgba(0, 207, 255, 0.3)',
+                              zIndex: 2,
+                              '& .zoom-overlay': { opacity: 1 },
+                              '& .attachment-image': { transform: 'scale(1.05)' }
+                            }
+                          }}
+                          onClick={() => handleImageClick(attachment, index)}
+                        >
+                          <SimpleMediaImage
+                            storageKey={attachment}
+                            className="attachment-image"
+                            alt="Attachment"
+                            sx={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            }}
+                          />
+                          <Box
+                            className="zoom-overlay"
+                            sx={{
+                              position: 'absolute',
+                              inset: 0,
+                              background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              opacity: 0,
+                              transition: 'opacity 0.3s ease',
+                              backdropFilter: 'blur(2px)',
+                            }}
+                          >
+                            <ZoomInIcon sx={{ 
+                              color: 'white', 
+                              fontSize: '28px',
+                              filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.4))'
+                            }} />
+                          </Box>
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: 8,
+                              right: 8,
+                              backgroundColor: 'rgba(0,0,0,0.75)',
+                              color: 'white',
+                              borderRadius: '12px',
+                              px: 1.5,
+                              py: 0.5,
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              backdropFilter: 'blur(6px)',
+                              border: '1px solid rgba(255,255,255,0.15)',
+                            }}
+                          >
+                            {index + 1}/{count}
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                  );
+                }
+                
+                // Three images - one large + two small
+                if (count === 3) {
+                  return (
+                    <Box sx={{ display: 'flex', gap: 1, maxWidth: '450px', height: '280px' }}>
+                      {/* First large image */}
+                      <Box 
+                        sx={{
+                          position: 'relative',
+                          borderRadius: 2.5,
+                          overflow: 'hidden',
+                          flex: 2,
+                          cursor: 'pointer',
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          '&:hover': {
+                            transform: 'scale(1.02)',
+                            boxShadow: '0 12px 32px rgba(0,0,0,0.15)',
+                            border: '1px solid rgba(0, 207, 255, 0.3)',
+                            zIndex: 2,
+                            '& .zoom-overlay': { opacity: 1 },
+                            '& .attachment-image': { transform: 'scale(1.05)' }
+                          }
+                        }}
+                        onClick={() => handleImageClick(message.attachments[0], 0)}
+                      >
+                        <SimpleMediaImage
+                          storageKey={message.attachments[0]}
+                          className="attachment-image"
+                          alt="Attachment"
+                          sx={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          }}
+                        />
+                        <Box
+                          className="zoom-overlay"
+                          sx={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0,
+                            transition: 'opacity 0.3s ease',
+                            backdropFilter: 'blur(2px)',
+                          }}
+                        >
+                          <ZoomInIcon sx={{ 
+                            color: 'white', 
+                            fontSize: '32px',
+                            filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.4))'
+                          }} />
+                        </Box>
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            backgroundColor: 'rgba(0,0,0,0.75)',
+                            color: 'white',
+                            borderRadius: '12px',
+                            px: 1.5,
+                            py: 0.5,
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            backdropFilter: 'blur(6px)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                          }}
+                        >
+                          1/{count}
+                        </Box>
+                      </Box>
+                      {/* Two smaller images */}
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1 }}>
+                        {message.attachments.slice(1, 3).map((attachment: string, index: number) => (
+                          <Box 
+                            key={index + 1}
+                            sx={{
+                              position: 'relative',
+                              borderRadius: 2,
+                              overflow: 'hidden',
+                              flex: 1,
+                              cursor: 'pointer',
+                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+                              border: '1px solid rgba(255,255,255,0.08)',
+                              '&:hover': {
+                                transform: 'scale(1.03)',
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                                border: '1px solid rgba(0, 207, 255, 0.3)',
+                                zIndex: 2,
+                                '& .zoom-overlay': { opacity: 1 },
+                                '& .attachment-image': { transform: 'scale(1.08)' }
+                              }
+                            }}
+                            onClick={() => handleImageClick(attachment, index + 1)}
+                          >
+                            <SimpleMediaImage
+                              storageKey={attachment}
+                              className="attachment-image"
+                              alt="Attachment"
+                              sx={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              }}
+                            />
+                            <Box
+                              className="zoom-overlay"
+                              sx={{
+                                position: 'absolute',
+                                inset: 0,
+                                background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                opacity: 0,
+                                transition: 'opacity 0.3s ease',
+                                backdropFilter: 'blur(2px)',
+                              }}
+                            >
+                              <ZoomInIcon sx={{ 
+                                color: 'white', 
+                                fontSize: '24px',
+                                filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.4))'
+                              }} />
+                            </Box>
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: 6,
+                                right: 6,
+                                backgroundColor: 'rgba(0,0,0,0.75)',
+                                color: 'white',
+                                borderRadius: '10px',
+                                px: 1,
+                                py: 0.25,
+                                fontSize: '0.7rem',
+                                fontWeight: 600,
+                                backdropFilter: 'blur(6px)',
+                                border: '1px solid rgba(255,255,255,0.15)',
+                              }}
+                            >
+                              {index + 2}/{count}
+                            </Box>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  );
+                }
+                
+                // Four images - 2x2 grid
+                if (count === 4) {
+                  return (
+                    <Box sx={{ 
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: 1,
+                      maxWidth: '400px',
+                      aspectRatio: '1',
+                    }}>
+                      {message.attachments.map((attachment: string, index: number) => (
+                        <Box 
+                          key={index}
+                          sx={{
+                            position: 'relative',
+                            borderRadius: 2,
+                            overflow: 'hidden',
+                            aspectRatio: '1',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            '&:hover': {
+                              transform: 'scale(1.05)',
+                              boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                              border: '1px solid rgba(0, 207, 255, 0.3)',
+                              zIndex: 2,
+                              '& .zoom-overlay': { opacity: 1 },
+                              '& .attachment-image': { transform: 'scale(1.08)' }
+                            }
+                          }}
+                          onClick={() => handleImageClick(attachment, index)}
+                        >
+                          <SimpleMediaImage
+                            storageKey={attachment}
+                            className="attachment-image"
+                            alt="Attachment"
+                            sx={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            }}
+                          />
+                          <Box
+                            className="zoom-overlay"
+                            sx={{
+                              position: 'absolute',
+                              inset: 0,
+                              background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              opacity: 0,
+                              transition: 'opacity 0.3s ease',
+                              backdropFilter: 'blur(2px)',
+                            }}
+                          >
+                            <ZoomInIcon sx={{ 
+                              color: 'white', 
+                              fontSize: '28px',
+                              filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.4))'
+                            }} />
+                          </Box>
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: 6,
+                              right: 6,
+                              backgroundColor: 'rgba(0,0,0,0.75)',
+                              color: 'white',
+                              borderRadius: '10px',
+                              px: 1,
+                              py: 0.25,
+                              fontSize: '0.7rem',
+                              fontWeight: 600,
+                              backdropFilter: 'blur(6px)',
+                              border: '1px solid rgba(255,255,255,0.15)',
+                            }}
+                          >
+                            {index + 1}/{count}
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                  );
+                }
+                
+                // Five or more images - special layout with overlay
+                if (count >= 5) {
+                  return (
+                    <Box sx={{ 
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: 1,
+                      maxWidth: '450px',
+                      aspectRatio: '3/2',
+                    }}>
+                      {/* First large image spanning 2 columns */}
+                      <Box 
+                        sx={{
+                          position: 'relative',
+                          borderRadius: 2.5,
+                          overflow: 'hidden',
+                          gridColumn: 'span 2',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          '&:hover': {
+                            transform: 'scale(1.02)',
+                            boxShadow: '0 12px 32px rgba(0,0,0,0.15)',
+                            border: '1px solid rgba(0, 207, 255, 0.3)',
+                            zIndex: 2,
+                            '& .zoom-overlay': { opacity: 1 },
+                            '& .attachment-image': { transform: 'scale(1.05)' }
+                          }
+                        }}
+                        onClick={() => handleImageClick(message.attachments[0], 0)}
+                      >
+                        <SimpleMediaImage
+                          storageKey={message.attachments[0]}
+                          className="attachment-image"
+                          alt="Attachment"
+                          sx={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          }}
+                        />
+                        <Box
+                          className="zoom-overlay"
+                          sx={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0,
+                            transition: 'opacity 0.3s ease',
+                            backdropFilter: 'blur(2px)',
+                          }}
+                        >
+                          <ZoomInIcon sx={{ 
+                            color: 'white', 
+                            fontSize: '32px',
+                            filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.4))'
+                          }} />
+                        </Box>
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            backgroundColor: 'rgba(0,0,0,0.75)',
+                            color: 'white',
+                            borderRadius: '12px',
+                            px: 1.5,
+                            py: 0.5,
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            backdropFilter: 'blur(6px)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                          }}
+                        >
+                          1/{count}
+                        </Box>
+                      </Box>
+                      
+                      {/* Remaining images in right column */}
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {message.attachments.slice(1, 3).map((attachment: string, index: number) => (
+                          <Box 
+                            key={index + 1}
+                            sx={{
+                              position: 'relative',
+                              borderRadius: 2,
+                              overflow: 'hidden',
+                              flex: 1,
+                              cursor: 'pointer',
+                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+                              border: '1px solid rgba(255,255,255,0.08)',
+                              '&:hover': {
+                                transform: 'scale(1.05)',
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                                border: '1px solid rgba(0, 207, 255, 0.3)',
+                                zIndex: 2,
+                                '& .zoom-overlay': { opacity: 1 },
+                                '& .attachment-image': { transform: 'scale(1.08)' }
+                              }
+                            }}
+                            onClick={() => handleImageClick(attachment, index + 1)}
+                          >
+                            <SimpleMediaImage
+                              storageKey={attachment}
+                              className="attachment-image"
+                              alt="Attachment"
+                              sx={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              }}
+                            />
+                            <Box
+                              className="zoom-overlay"
+                              sx={{
+                                position: 'absolute',
+                                inset: 0,
+                                background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                opacity: 0,
+                                transition: 'opacity 0.3s ease',
+                                backdropFilter: 'blur(2px)',
+                              }}
+                            >
+                              {/* Show "+N more" overlay on the last visible image */}
+                              {index === 1 && count > 3 ? (
+                                <Box sx={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  gap: 0.5
+                                }}>
+                                  <Typography sx={{
+                                    color: 'white',
+                                    fontSize: '1.2rem',
+                                    fontWeight: 700,
+                                    textShadow: '0 2px 8px rgba(0,0,0,0.8)'
+                                  }}>
+                                    +{count - 3}
+                                  </Typography>
+                                  <Typography sx={{
+                                    color: 'white',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 500,
+                                    textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+                                    opacity: 0.9
+                                  }}>
+                                    ещё
+                                  </Typography>
+                                </Box>
+                              ) : (
+                                <ZoomInIcon sx={{ 
+                                  color: 'white', 
+                                  fontSize: '20px',
+                                  filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.4))'
+                                }} />
+                              )}
+                            </Box>
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: 6,
+                                right: 6,
+                                backgroundColor: 'rgba(0,0,0,0.75)',
+                                color: 'white',
+                                borderRadius: '10px',
+                                px: 1,
+                                py: 0.25,
+                                fontSize: '0.7rem',
+                                fontWeight: 600,
+                                backdropFilter: 'blur(6px)',
+                                border: '1px solid rgba(255,255,255,0.15)',
+                              }}
+                            >
+                              {index + 2}/{count}
+                            </Box>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  );
+                }
+                
+                return null;
+              })()
+              }
+            </Box>
+          )}
+          
+          {/* Message content */}
+          <Box sx={{ 
+            display: 'flex', 
+            flexDirection: 'column',
+            position: 'relative'
+          }}>
+            {message.content && (
               <Typography
                 sx={{ 
                   color: 'rgba(255,255,255,0.85)', 
@@ -297,60 +983,74 @@ const ChatMessageItem = React.memo<ChatMessageItemProps>(({
                   )
                 }}
               />
-              <Box sx={{ 
+            )}
+            <Box sx={{ 
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.5,
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              padding: '0 8px',
+            }}>
+              {message.last_modified_at && message.last_modified_at !== message.created_at && (
+                <span style={{ 
+                  color: '#90caf9', 
+                  fontSize: '0.85em', 
+                  fontStyle: 'italic',
+                  fontWeight: 500
+                }}>ред.</span>
+              )}
+              {message.author.id === currentUserId && (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    mr: 0.5
+                  }}
+                >
+                  <DoneAllIcon 
+                    sx={{ 
+                      fontSize: '1rem',
+                      color: message.read_by_count && message.read_by_count > 0 ? '#FF69B4' : 'rgba(255,255,255,0.35)'
+                    }} 
+                  />
+                </Box>
+              )}
+              <Typography sx={{ 
+                color: 'rgba(255,255,255,0.35)', 
+                fontSize: '0.78rem', 
+                lineHeight: 1,
+                whiteSpace: 'nowrap',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 0.5,
-                position: 'absolute',
-                top: 0,
-                right: 0,
-                padding: '0 8px',
+                gap: 0.5
               }}>
-                {message.last_modified_at && message.last_modified_at !== message.created_at && (
-                  <span style={{ 
-                    color: '#90caf9', 
-                    fontSize: '0.85em', 
-                    fontStyle: 'italic',
-                    fontWeight: 500
-                  }}>ред.</span>
-                )}
-                {message.author.id === currentUserId && (
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 0.5,
-                      mr: 0.5
-                    }}
-                  >
-                    <DoneAllIcon 
-                      sx={{ 
-                        fontSize: '1rem',
-                        color: message.read_by_count && message.read_by_count > 0 ? '#FF69B4' : 'rgba(255,255,255,0.35)'
-                      }} 
-                    />
-                  </Box>
-                )}
-                <Typography sx={{ 
-                  color: 'rgba(255,255,255,0.35)', 
-                  fontSize: '0.78rem', 
-                  lineHeight: 1,
-                  whiteSpace: 'nowrap',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.5
-                }}>
-                  {formatMessageTime(message.created_at)}
-                </Typography>
-              </Box>
+                {formatMessageTime(message.created_at)}
+              </Typography>
             </Box>
           </Box>
         </Box>
       </Box>
-    </Box>
+      
+      {/* Image Lightbox Modal */}
+      {/* Full-screen image modal */}
+      <MessageImagePreviewModal
+        open={!!viewingImage}
+        images={message.attachments || []}
+        currentIndex={currentImageIndex}
+        onClose={() => setViewingImage(null)}
+        onNavigate={(index) => {
+          setCurrentImageIndex(index);
+          setViewingImage(message.attachments[index]);
+        }}
+      />
+    </>
   );
 });
 
 ChatMessageItem.displayName = 'ChatMessageItem';
 
+// Add default export to maintain compatibility with existing imports
 export default ChatMessageItem;

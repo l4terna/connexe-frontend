@@ -164,7 +164,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     processedItems,
     prepareScrollCorrection
   } = useMessageVirtualization(messages, tempMessages, messagesContainerRef, {
-    estimatedItemSize: 60, // Simple uniform size for all items
+    estimatedItemSize: 40, // Увеличиваем начальную оценку для более точного расчета
     overscan: 5,
     onScroll: useCallback((container: HTMLElement) => {
       // Handle pagination using the provided function
@@ -323,9 +323,17 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     
     if (!item) return null;
 
-    // Set ref for measuring
+    // Set ref for measuring - простая функция без хуков
     const setMeasureRef = (element: HTMLDivElement | null) => {
-      measureElement(index, element);
+      if (element) {
+        // Форсируем layout перед измерением
+        element.style.contain = 'layout style';
+        
+        // Измеряем элемент без форсированного обновления
+        measureElement(index, element);
+      } else {
+        measureElement(index, null);
+      }
     };
 
     if (item.type === 'date') {
@@ -553,13 +561,13 @@ const MessageList: React.FC<MessageListProps> = (props) => {
           onReply={(message) => {
             setReplyingToMessage(message);
           }}
-          onEdit={(messageId) => setEditingMessageId(messageId)}
-          onDelete={(messageId) => handleDeleteMessage(messageId)}
+          onEdit={(messageId) => setEditingMessageId(typeof messageId === 'number' ? messageId : messageId.id)}
+          onDelete={(messageId) => handleDeleteMessage(typeof messageId === 'number' ? messageId : messageId.id)}
           onReplyClick={handleReplyClick}
         />
       </Box>
     );
-  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, handleEditMessage]);
+  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, handleEditMessage, measureElement]);
 
   // Effect to handle scroll to message when ref changes
   useEffect(() => {

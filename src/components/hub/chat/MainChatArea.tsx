@@ -281,7 +281,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   );
   
   
-  const MESSAGES_PER_PAGE = 80;
+  const MESSAGES_PER_PAGE = 50;
   
   // Декларации функций объявлены заранее для React useCallback
 
@@ -699,11 +699,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   }, [replyingToMessage]);
 
 
-  const handleSendMessage = useCallback(async (values: { content: string }, { resetForm }: { resetForm: () => void }) => {
+  const handleSendMessage = useCallback(async (values: { content: string, images?: File[] }, { resetForm }: { resetForm: () => void }) => {
     if (!activeChannel || !user) return;
 
     const content = values.content.trim();
-    if (!content) return;
+    const hasImages = values.images && values.images.length > 0;
+    
+    // Require either content or images
+    if (!content && !hasImages) return;
 
     // Clear the input field immediately
     resetForm();
@@ -743,12 +746,15 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       resetForm();
 
-      // Send the message to the server
+      // Prepare payload for API request
       const apiPayload = {
         channelId: activeChannel.id,
         content: values.content,
+        ...(hasImages ? { attachments: values.images } : {}),
         ...(replyMessage?.id ? { replyId: replyMessage.id } : {})
-      };      
+      };
+      
+      // Send message to the server
       const result = await createMessage(apiPayload).unwrap();
       
       // Remove the temporary message once we get confirmation

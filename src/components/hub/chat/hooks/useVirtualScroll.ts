@@ -26,7 +26,7 @@ interface UseVirtualScrollResult {
   totalSize: number;
   scrollToIndex: (index: number, align?: 'start' | 'center' | 'end') => void;
   scrollToOffset: (offset: number) => void;
-  measureElement: (index: number, element: HTMLElement | null) => void;
+  measureElement: (index: number, element: HTMLElement | null, forceUpdate?: boolean) => void;
   prepareScrollCorrection: () => void;
   heightCache: { [itemKey: string]: number };
 }
@@ -63,8 +63,7 @@ export const useVirtualScroll = (
   // Force re-render when measurements change
   const [measurementVersion, setMeasurementVersion] = useState(0);
 
-  // Дебаунс для обновления измерений
-  const measurementUpdateTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  // Убираем дебаунс для мгновенного обновления
 
   // Scroll correction state for pagination
   const [scrollCorrection, setScrollCorrection] = useState<{
@@ -73,15 +72,9 @@ export const useVirtualScroll = (
     shouldCorrect: boolean;
   } | null>(null);
 
-  // Обновляем setMeasurementVersion чтобы использовать дебаунс
+  // Мгновенное обновление измерений без дебаунса
   const updateMeasurements = useCallback(() => {
-    if (measurementUpdateTimeoutRef.current) {
-      clearTimeout(measurementUpdateTimeoutRef.current);
-    }
-
-    measurementUpdateTimeoutRef.current = setTimeout(() => {
-      setMeasurementVersion((v) => v + 1);
-    }, 50); // Небольшая задержка для батчинга обновлений
+    setMeasurementVersion((v) => v + 1);
   }, []);
 
   // Calculate item offsets and total size
@@ -247,54 +240,58 @@ export const useVirtualScroll = (
   // Initialize ResizeObserver
   useEffect(() => {
     resizeObserverRef.current = new ResizeObserver((entries) => {
-      let hasChanges = false;
-      const scrollElement = getScrollElement();
-      const currentScrollTop = scrollElement?.scrollTop || 0;
+      // Используем RAF для синхронизации с браузерным рендерингом
+      requestAnimationFrame(() => {
+        let hasChanges = false;
+        const scrollElement = getScrollElement();
+        const currentScrollTop = scrollElement?.scrollTop || 0;
 
-      // Track total size change for items above current viewport
-      let sizeChangeAboveViewport = 0;
+        // Track total size change for items above current viewport
+        let sizeChangeAboveViewport = 0;
 
-      entries.forEach((entry) => {
-        const element = entry.target as HTMLElement;
-        const index = parseInt(element.dataset.index || '-1');
+        entries.forEach((entry) => {
+          const element = entry.target as HTMLElement;
+          const index = parseInt(element.dataset.index || '-1');
 
-        if (index >= 0) {
-          const currentSize = measurementsRef.current[index];
-          const newSize = entry.contentRect.height;
+          if (index >= 0) {
+            const currentSize = measurementsRef.current[index];
+            // Используем borderBoxSize для более точных измерений
+            const newSize = entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height;
 
-          if (currentSize !== newSize) {
-            measurementsRef.current[index] = newSize;
-            hasChanges = true;
+            if (Math.abs(currentSize - newSize) > 0.1) { // Более чувствительный порог
+              measurementsRef.current[index] = newSize;
+              hasChanges = true;
 
-            // Calculate if this affects scroll position
-            const itemOffset = itemOffsetsRef.current[index] || 0;
-            if (itemOffset < currentScrollTop && currentSize) {
-              sizeChangeAboveViewport += newSize - currentSize;
+              // Calculate if this affects scroll position
+              const itemOffset = itemOffsetsRef.current[index] || 0;
+              if (itemOffset < currentScrollTop && currentSize) {
+                sizeChangeAboveViewport += newSize - currentSize;
+              }
+
+              // Update the height cache for this item
+              const itemKey = getItemKey(index);
+              heightCacheRef.current[itemKey] = newSize;
             }
+          }
+        });
 
-            // Update the height cache for this item
-            const itemKey = getItemKey(index);
-            heightCacheRef.current[itemKey] = newSize;
+        if (hasChanges) {
+          // Мгновенное обновление
+          updateMeasurements();
+
+          // Only adjust scroll position if user is not actively scrolling
+          // and we're not in a state where new content is being loaded at the bottom
+          if (sizeChangeAboveViewport !== 0 && scrollElement && !isScrolling && !preventScrollAdjustment) {
+            // Check if we're near the bottom - if so, don't adjust scroll position
+            const isNearBottom = (scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight) < 100;
+
+            if (!isNearBottom) {
+              // Немедленное обновление позиции скролла
+              scrollElement.scrollTop = currentScrollTop + sizeChangeAboveViewport;
+            }
           }
         }
       });
-
-      if (hasChanges) {
-        updateMeasurements();
-
-        // Only adjust scroll position if user is not actively scrolling
-        // and we're not in a state where new content is being loaded at the bottom
-        if (sizeChangeAboveViewport !== 0 && scrollElement && !isScrolling && !preventScrollAdjustment) {
-          // Check if we're near the bottom - if so, don't adjust scroll position
-          const isNearBottom = (scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight) < 100;
-
-          if (!isNearBottom) {
-            requestAnimationFrame(() => {
-              scrollElement.scrollTop = currentScrollTop + sizeChangeAboveViewport;
-            });
-          }
-        }
-      }
     });
 
     return () => {
@@ -303,7 +300,7 @@ export const useVirtualScroll = (
   }, [isScrolling, preventScrollAdjustment]);
 
   // Function to measure an element and update cache
-  const measureElement = useCallback((index: number, element: HTMLElement | null) => {
+  const measureElement = useCallback((index: number, element: HTMLElement | null, forceUpdate: boolean = false) => {
     // Unobserve previous element for this index
     const previousElement = measuredElementsRef.current.get(index);
     if (previousElement && resizeObserverRef.current) {
@@ -315,24 +312,51 @@ export const useVirtualScroll = (
       // Store data-index attribute for ResizeObserver
       element.dataset.index = index.toString();
 
-      // Measure initial size
-      const newSize = element.getBoundingClientRect().height;
-      const currentSize = measurementsRef.current[index];
-
-      if (currentSize !== newSize) {
-        measurementsRef.current[index] = newSize;
-        updateMeasurements();
-
-        // Update the height cache for this item
-        const itemKey = getItemKey(index);
-        heightCacheRef.current[itemKey] = newSize;
+      // Сначала добавляем элемент в observer для отслеживания изменений
+      measuredElementsRef.current.set(index, element);
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.observe(element);
       }
 
-      // Track element and observe for resize
-      measuredElementsRef.current.set(index, element);
-      resizeObserverRef.current.observe(element);
+      // Функция для форсированного измерения
+      const forceMeasure = () => {
+        if (!element.isConnected) return; // Проверяем что элемент все еще в DOM
+        
+        const rect = element.getBoundingClientRect();
+        const newSize = rect.height;
+        const currentSize = measurementsRef.current[index];
+
+        if (forceUpdate || Math.abs(currentSize - newSize) > 0.1) { // Форсированное обновление или если есть изменения
+          measurementsRef.current[index] = newSize;
+          
+          // Update the height cache for this item
+          const itemKey = getItemKey(index);
+          heightCacheRef.current[itemKey] = newSize;
+          
+          // Мгновенное обновление
+          updateMeasurements();
+          
+          // Триггерим ResizeObserver для этого элемента
+          if (resizeObserverRef.current && forceUpdate) {
+            // Перенаблюдаем элемент чтобы триггернуть callback
+            resizeObserverRef.current.unobserve(element);
+            resizeObserverRef.current.observe(element);
+          }
+        }
+      };
+
+      // Измеряем сразу
+      forceMeasure();
+      
+      // И еще раз после рендеринга
+      requestAnimationFrame(() => {
+        forceMeasure();
+        
+        // И еще раз через небольшую задержку для загрузки изображений и т.д.
+        setTimeout(forceMeasure, 100);
+      });
     }
-  }, []);
+  }, [getItemKey, updateMeasurements]);
 
   // Function to scroll to a specific index
   const scrollToIndex = useCallback(
@@ -473,7 +497,6 @@ export const useMessageVirtualization = (
 
     let currentDateString: string | null = null;
     let processedDates = new Set<string>();
-    let previousMessage: ExtendedMessage | null = null;
 
     sortedMessages.forEach((msg) => {
       const messageDate = new Date(msg.created_at);
@@ -496,8 +519,6 @@ export const useMessageVirtualization = (
         data: msg,
         estimatedSize: estimatedItemSize
       });
-      
-      previousMessage = msg;
     });
 
     return items;

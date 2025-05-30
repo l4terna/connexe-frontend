@@ -75,7 +75,7 @@ export const api = createApi({
     return result;
   },
   endpoints: () => ({}),
-  tagTypes: ['User', 'Hub', 'Channel', 'Role', 'Category', 'UserProfile', 'HubMember'],
+  tagTypes: ['User', 'Hub', 'Channel', 'Role', 'Category', 'UserProfile', 'HubMember', 'Media'],
 });
 
 // Create a helper API for one-off requests that don't need endpoints

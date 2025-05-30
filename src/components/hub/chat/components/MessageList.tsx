@@ -152,10 +152,9 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     forceScrollToMessageId
   } = props;
 
-
   // State for controlling smooth scroll behavior
   const [disableSmoothScroll, setDisableSmoothScroll] = React.useState(false);
-  
+
   // Use virtualization hook
   const {
     virtualItems,
@@ -165,8 +164,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
     processedItems,
     prepareScrollCorrection
   } = useMessageVirtualization(messages, tempMessages, messagesContainerRef, {
-    // estimatedMessageHeight: 80,
-    // estimatedDateHeight: 60,
+    estimatedItemSize: 60, // Simple uniform size for all items
     overscan: 5,
     onScroll: useCallback((container: HTMLElement) => {
       // Handle pagination using the provided function

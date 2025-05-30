@@ -16,6 +16,9 @@ interface UseVirtualScrollOptions {
   overscan?: number;
   getScrollElement: () => HTMLElement | null;
   preventScrollAdjustment?: boolean;
+  getItemHeight?: (i: number) => number;
+  getItemKey?: (i: number) => string;
+  heightCache?: { [itemKey: string]: number };
 }
 
 interface UseVirtualScrollResult {
@@ -25,6 +28,7 @@ interface UseVirtualScrollResult {
   scrollToOffset: (offset: number) => void;
   measureElement: (index: number, element: HTMLElement | null) => void;
   prepareScrollCorrection: () => void;
+  heightCache: { [itemKey: string]: number };
 }
 
 export const useVirtualScroll = (
@@ -37,60 +41,87 @@ export const useVirtualScroll = (
     overscan = 5,
     getScrollElement,
     onScroll,
-    preventScrollAdjustment = false
+    preventScrollAdjustment = false,
+    getItemHeight = () => estimatedItemSize,
+    getItemKey = (i) => i.toString(),
+    heightCache = {},
   } = options;
 
   const [scrollTop, setScrollTop] = useState(0);
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
-  
+  const heightCacheRef = useRef(heightCache);
+
   // Store measured sizes for each item
-  const measuredSizesRef = useRef<Map<number, number>>(new Map());
   const itemOffsetsRef = useRef<number[]>([]);
-  
+  const measurementsRef = useRef<number[]>([]);
+
   // Track measured elements to observe size changes
   const resizeObserverRef = useRef<ResizeObserver | undefined>(undefined);
   const measuredElementsRef = useRef<Map<number, HTMLElement>>(new Map());
-  
+
   // Force re-render when measurements change
   const [measurementVersion, setMeasurementVersion] = useState(0);
-  
+
   // Дебаунс для обновления измерений
   const measurementUpdateTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
-  
+
   // Scroll correction state for pagination
   const [scrollCorrection, setScrollCorrection] = useState<{
     heightBefore: number;
     scrollBefore: number;
     shouldCorrect: boolean;
   } | null>(null);
-  
+
   // Обновляем setMeasurementVersion чтобы использовать дебаунс
   const updateMeasurements = useCallback(() => {
     if (measurementUpdateTimeoutRef.current) {
       clearTimeout(measurementUpdateTimeoutRef.current);
     }
-    
+
     measurementUpdateTimeoutRef.current = setTimeout(() => {
-      setMeasurementVersion(v => v + 1);
+      setMeasurementVersion((v) => v + 1);
     }, 50); // Небольшая задержка для батчинга обновлений
   }, []);
 
   // Calculate item offsets and total size
   const { totalSize } = useMemo(() => {
+    const oldMeasurements = measurementsRef.current.slice(0, items.length);
+    const newMeasurements = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const itemKey = getItemKey(i);
+      const cachedHeight = heightCacheRef.current[itemKey];
+      const oldHeight = oldMeasurements[i];
+      
+      if (cachedHeight) {
+        // Use the cached height if available
+        newMeasurements[i] = cachedHeight;
+      } else if (oldHeight) {
+        // Otherwise fall back to previously measured height
+        newMeasurements[i] = oldHeight;
+      } else {
+        // Get the estimated height for this item
+        const estimatedHeight = getItemHeight(i);
+        newMeasurements[i] = estimatedHeight;
+        
+        // Pre-populate the cache with our estimation
+        // This helps avoid layout shifts when scrolling quickly
+        heightCacheRef.current[itemKey] = estimatedHeight;
+      }
+    }
+
     const offsets: number[] = [];
     let currentOffset = 0;
 
     for (let i = 0; i < items.length; i++) {
       offsets[i] = currentOffset;
-      const measuredSize = measuredSizesRef.current.get(i);
-      // Use item's size property if available, otherwise use measured or estimated size
-      const itemSize = items[i]?.size || items[i]?.estimatedSize;
-      const size = measuredSize ?? itemSize ?? estimatedItemSize;
+      const size = newMeasurements[i];
       currentOffset += size;
     }
 
     itemOffsetsRef.current = offsets;
+    measurementsRef.current = newMeasurements;
     return { itemOffsets: offsets, totalSize: currentOffset };
   }, [items.length, estimatedItemSize, measurementVersion]);
 
@@ -106,18 +137,18 @@ export const useVirtualScroll = (
     // Binary search for start index
     let start = 0;
     let end = items.length - 1;
-    
+
     while (start <= end) {
       const mid = Math.floor((start + end) / 2);
       const offset = itemOffsetsRef.current[mid];
-      
+
       if (offset < scrollStart) {
         start = mid + 1;
       } else {
         end = mid - 1;
       }
     }
-    
+
     const startIdx = Math.max(0, start - overscan);
 
     // Find end index
@@ -134,9 +165,7 @@ export const useVirtualScroll = (
     const virtualItemsList: VirtualItem[] = [];
     for (let i = startIdx; i <= endIdx; i++) {
       const offset = itemOffsetsRef.current[i];
-      const measuredSize = measuredSizesRef.current.get(i);
-      const itemSize = items[i]?.size || items[i]?.estimatedSize;
-      const size = measuredSize ?? itemSize ?? estimatedItemSize;
+      const size = measurementsRef.current[i];
 
       virtualItemsList.push({
         id: `item-${i}`,
@@ -144,26 +173,26 @@ export const useVirtualScroll = (
         start: offset,
         size,
         type: items[i]?.type || 'message', // Use type from item if available
-        data: items[i]?.data || items[i]
+        data: items[i]?.data || items[i],
       });
     }
 
     return {
       startIndex: startIdx,
       endIndex: endIdx,
-      virtualItems: virtualItemsList
+      virtualItems: virtualItemsList,
     };
   }, [scrollTop, containerHeight, items.length, overscan, estimatedItemSize, measurementVersion]);
 
   // Throttle scroll updates
   const scrollThrottleRef = useRef<boolean>(false);
-  
+
   // Handle scroll events
   const handleScroll = useCallback(() => {
     // Throttle scroll updates to every 16ms (60fps)
     if (scrollThrottleRef.current) return;
     scrollThrottleRef.current = true;
-    
+
     requestAnimationFrame(() => {
       const element = getScrollElement();
       if (!element) {
@@ -173,7 +202,7 @@ export const useVirtualScroll = (
 
       const newScrollTop = element.scrollTop;
       setScrollTop(newScrollTop);
-      
+
       if (!isScrolling) {
         setIsScrolling(true);
       }
@@ -187,15 +216,15 @@ export const useVirtualScroll = (
       scrollTimeoutRef.current = setTimeout(() => {
         setIsScrolling(false);
       }, 150);
-      
+
       // Call additional onScroll callback if provided
       if (onScroll) {
         onScroll(element);
       }
-      
+
       scrollThrottleRef.current = false;
     });
-  }, [isScrolling, onScroll]); // Added onScroll to dependencies
+  }, [isScrolling, onScroll]);
 
   // Set up scroll listener
   useEffect(() => {
@@ -203,7 +232,7 @@ export const useVirtualScroll = (
     if (!element) return;
 
     element.addEventListener('scroll', handleScroll, { passive: true });
-    
+
     // Get initial scroll position
     setScrollTop(element.scrollTop);
 
@@ -213,7 +242,7 @@ export const useVirtualScroll = (
         clearTimeout(scrollTimeoutRef.current);
       }
     };
-  }, [handleScroll]); // Removed getScrollElement from dependencies
+  }, [handleScroll]);
 
   // Initialize ResizeObserver
   useEffect(() => {
@@ -221,40 +250,44 @@ export const useVirtualScroll = (
       let hasChanges = false;
       const scrollElement = getScrollElement();
       const currentScrollTop = scrollElement?.scrollTop || 0;
-      
+
       // Track total size change for items above current viewport
       let sizeChangeAboveViewport = 0;
-      
+
       entries.forEach((entry) => {
         const element = entry.target as HTMLElement;
         const index = parseInt(element.dataset.index || '-1');
-        
+
         if (index >= 0) {
-          const currentSize = measuredSizesRef.current.get(index);
+          const currentSize = measurementsRef.current[index];
           const newSize = entry.contentRect.height;
-          
+
           if (currentSize !== newSize) {
-            measuredSizesRef.current.set(index, newSize);
+            measurementsRef.current[index] = newSize;
             hasChanges = true;
-            
+
             // Calculate if this affects scroll position
             const itemOffset = itemOffsetsRef.current[index] || 0;
             if (itemOffset < currentScrollTop && currentSize) {
-              sizeChangeAboveViewport += (newSize - currentSize);
+              sizeChangeAboveViewport += newSize - currentSize;
             }
+
+            // Update the height cache for this item
+            const itemKey = getItemKey(index);
+            heightCacheRef.current[itemKey] = newSize;
           }
         }
       });
-      
+
       if (hasChanges) {
         updateMeasurements();
-        
+
         // Only adjust scroll position if user is not actively scrolling
         // and we're not in a state where new content is being loaded at the bottom
         if (sizeChangeAboveViewport !== 0 && scrollElement && !isScrolling && !preventScrollAdjustment) {
           // Check if we're near the bottom - if so, don't adjust scroll position
           const isNearBottom = (scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight) < 100;
-          
+
           if (!isNearBottom) {
             requestAnimationFrame(() => {
               scrollElement.scrollTop = currentScrollTop + sizeChangeAboveViewport;
@@ -263,7 +296,7 @@ export const useVirtualScroll = (
         }
       }
     });
-    
+
     return () => {
       resizeObserverRef.current?.disconnect();
     };
@@ -277,20 +310,24 @@ export const useVirtualScroll = (
       resizeObserverRef.current.unobserve(previousElement);
       measuredElementsRef.current.delete(index);
     }
-    
+
     if (element && resizeObserverRef.current) {
       // Store data-index attribute for ResizeObserver
       element.dataset.index = index.toString();
-      
+
       // Measure initial size
       const newSize = element.getBoundingClientRect().height;
-      const currentSize = measuredSizesRef.current.get(index);
-      
+      const currentSize = measurementsRef.current[index];
+
       if (currentSize !== newSize) {
-        measuredSizesRef.current.set(index, newSize);
+        measurementsRef.current[index] = newSize;
         updateMeasurements();
+
+        // Update the height cache for this item
+        const itemKey = getItemKey(index);
+        heightCacheRef.current[itemKey] = newSize;
       }
-      
+
       // Track element and observe for resize
       measuredElementsRef.current.set(index, element);
       resizeObserverRef.current.observe(element);
@@ -298,33 +335,31 @@ export const useVirtualScroll = (
   }, []);
 
   // Function to scroll to a specific index
-  const scrollToIndex = useCallback((
-    index: number, 
-    align: 'start' | 'center' | 'end' = 'start'
-  ) => {
-    const element = getScrollElement();
-    if (!element || index < 0 || index >= items.length) return;
+  const scrollToIndex = useCallback(
+    (index: number, align: 'start' | 'center' | 'end' = 'start') => {
+      const element = getScrollElement();
+      if (!element || index < 0 || index >= items.length) return;
 
-    const offset = itemOffsetsRef.current[index];
-    const measuredSize = measuredSizesRef.current.get(index);
-    const itemSize = items[index]?.size || items[index]?.estimatedSize;
-    const size = measuredSize ?? itemSize ?? estimatedItemSize;
-    
-    let scrollTo = offset;
-    
-    switch (align) {
-      case 'center':
-        scrollTo = offset + size / 2 - containerHeight / 2;
-        break;
-      case 'end':
-        scrollTo = offset + size - containerHeight;
-        break;
-      default: // 'start'
-        scrollTo = offset;
-    }
-    
-    element.scrollTop = Math.max(0, scrollTo);
-  }, [items.length, estimatedItemSize, containerHeight]); // Removed getScrollElement
+      const offset = itemOffsetsRef.current[index];
+      const size = measurementsRef.current[index];
+
+      let scrollTo = offset;
+
+      switch (align) {
+        case 'center':
+          scrollTo = offset + size / 2 - containerHeight / 2;
+          break;
+        case 'end':
+          scrollTo = offset + size - containerHeight;
+          break;
+        default: // 'start'
+          scrollTo = offset;
+      }
+
+      element.scrollTop = Math.max(0, scrollTo);
+    },
+    [items.length, containerHeight]
+  );
 
   // Function to scroll to a specific offset
   const scrollToOffset = useCallback((offset: number) => {
@@ -332,41 +367,41 @@ export const useVirtualScroll = (
     if (!element) return;
 
     element.scrollTop = Math.max(0, offset);
-  }, []); // Empty dependencies - getScrollElement is accessed within callback
-  
+  }, []);
+
   // Function to prepare scroll correction before content changes
   const prepareScrollCorrection = useCallback(() => {
     const element = getScrollElement();
     if (!element || preventScrollAdjustment) return;
-    
+
     setScrollCorrection({
       heightBefore: element.scrollHeight,
       scrollBefore: element.scrollTop,
-      shouldCorrect: true
+      shouldCorrect: true,
     });
   }, [getScrollElement, preventScrollAdjustment]);
-  
+
   // Synchronous scroll correction after content changes
   useLayoutEffect(() => {
     if (!scrollCorrection?.shouldCorrect) return;
-    
+
     const element = getScrollElement();
     if (!element) return;
-    
+
     // Calculate height difference
     const heightAfter = element.scrollHeight;
     const heightDiff = heightAfter - scrollCorrection.heightBefore;
-    
+
     if (heightDiff > 0) {
       // Correct scroll position synchronously
       element.scrollTop = scrollCorrection.scrollBefore + heightDiff;
-      
+
       // Ensure minimum distance from top
       if (element.scrollTop < 150) {
         element.scrollTop = 150;
       }
     }
-    
+
     // Reset correction state
     setScrollCorrection(null);
   }, [scrollCorrection, getScrollElement]);
@@ -377,7 +412,8 @@ export const useVirtualScroll = (
     scrollToIndex,
     scrollToOffset,
     measureElement,
-    prepareScrollCorrection
+    prepareScrollCorrection,
+    heightCache: heightCacheRef.current,
   };
 };
 
@@ -387,16 +423,14 @@ export const useMessageVirtualization = (
   tempMessages: Map<string, ExtendedMessage>,
   containerRef: React.RefObject<HTMLElement | null>,
   options: {
-    estimatedMessageHeight?: number;
-    estimatedDateHeight?: number;
+    estimatedItemSize?: number;
     overscan?: number;
     onScroll?: (container: HTMLElement) => void;
     preventScrollAdjustment?: boolean;
   } = {}
 ) => {
   const {
-    estimatedMessageHeight = 80,
-    estimatedDateHeight = 60,
+    estimatedItemSize = 60, // Single size for all items
     overscan = 5,
     onScroll,
     preventScrollAdjustment = false
@@ -422,60 +456,7 @@ export const useMessageVirtualization = (
     return () => resizeObserver.disconnect();
   }, []); // Empty dependencies since containerRef is stable
 
-  // Helper function to estimate message height based on content
-  const estimateMessageHeight = useCallback((msg: ExtendedMessage, prevMsg: ExtendedMessage | null) => {
-    // Base height for message container padding and margins
-    let baseHeight = 16; // padding top/bottom
-    
-    // Add height for avatar and username if first in group
-    const isFirstOfGroup = !prevMsg || 
-      prevMsg.author.id !== msg.author.id || 
-      Math.abs(new Date(prevMsg.created_at).getTime() - new Date(msg.created_at).getTime()) > 30 * 60 * 1000;
-    
-    if (isFirstOfGroup) {
-      baseHeight += 40; // Avatar height
-      baseHeight += 24; // Username height with margin
-    } else {
-      baseHeight += 8; // Small gap between grouped messages
-    }
-    
-    // Estimate content height based on character count and average container width
-    // Assuming container width ~800px and average character width
-    const charsPerLine = 90; // Approximate characters per line
-    const lineHeight = 22; // Line height in pixels
-    
-    // Count actual lines including word wrapping
-    const words = msg.content.split(' ');
-    let currentLineLength = 0;
-    let lines = 1;
-    
-    words.forEach(word => {
-      // Add 1 for space
-      if (currentLineLength + word.length + 1 > charsPerLine) {
-        lines++;
-        currentLineLength = word.length;
-      } else {
-        currentLineLength += word.length + 1;
-      }
-    });
-    
-    // Also account for explicit line breaks
-    const explicitBreaks = (msg.content.match(/\n/g) || []).length;
-    lines += explicitBreaks;
-    
-    const contentHeight = Math.max(lineHeight, lines * lineHeight);
-    
-    // Add height for reply preview if present
-    if (msg.reply) {
-      baseHeight += 65; // Reply container with padding
-    }
-    
-    // Add height for message timestamp and actions
-    baseHeight += 20; // Space for hover actions
-    
-    // Return total with small buffer
-    return Math.ceil(baseHeight + contentHeight + 8);
-  }, []);
+  // Removed complex height estimation - using simple estimatedItemSize for all items
 
   // Process messages into virtual items (including date separators)
   const processedItems = useMemo(() => {
@@ -503,24 +484,24 @@ export const useMessageVirtualization = (
         items.push({
           type: 'date',
           data: msg.created_at,
-          estimatedSize: estimatedDateHeight
+          estimatedSize: estimatedItemSize
         });
         currentDateString = messageDateString;
         processedDates.add(messageDateString);
       }
 
-      // Add the message with estimated height
+      // Add the message with simple estimated size
       items.push({
         type: 'message',
         data: msg,
-        estimatedSize: estimateMessageHeight(msg, previousMessage)
+        estimatedSize: estimatedItemSize
       });
       
       previousMessage = msg;
     });
 
     return items;
-  }, [messages, tempMessages, estimatedDateHeight, estimateMessageHeight]);
+  }, [messages, tempMessages, estimatedItemSize]);
 
   // Create items with their estimated sizes for virtual scroll
   const itemsWithSizes = useMemo(() => 
@@ -533,7 +514,7 @@ export const useMessageVirtualization = (
 
   const virtualScroll = useVirtualScroll(itemsWithSizes, {
     containerHeight,
-    estimatedItemSize: estimatedMessageHeight,
+    estimatedItemSize: estimatedItemSize,
     overscan,
     getScrollElement: () => containerRef.current as HTMLElement,
     onScroll,

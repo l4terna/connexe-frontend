@@ -60,13 +60,19 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
         <Box
           sx={{
             position: 'relative',
-            width: '100vw',
-            height: '100vh',
+            width: '90vw',
+            height: '90vh',
+            maxWidth: '1400px',
+            maxHeight: '900px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(13,13,26,0.95) 0%, rgba(26,26,46,0.95) 100%)',
+            background: 'linear-gradient(135deg, rgba(13,13,26,0.98) 0%, rgba(26,26,46,0.98) 100%)',
+            borderRadius: 3,
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.8)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
             outline: 'none',
+            overflow: 'hidden',
           }}
           onClick={onClose}
         >
@@ -75,8 +81,8 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
               <Box
                 sx={{
                   position: 'relative',
-                  maxWidth: '90vw',
-                  maxHeight: '90vh',
+                  maxWidth: 'calc(100% - 120px)',
+                  maxHeight: 'calc(100% - 120px)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -89,7 +95,7 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                   alt="Fullscreen preview"
                   sx={{
                     maxWidth: '100%',
-                    maxHeight: '90vh',
+                    maxHeight: '100%',
                     objectFit: 'contain',
                     borderRadius: 2,
                     boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
@@ -106,7 +112,7 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                   }}
                   sx={{
                     position: 'absolute',
-                    left: 40,
+                    left: 20,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -152,7 +158,7 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                   }}
                   sx={{
                     position: 'absolute',
-                    right: 40,
+                    right: 20,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -198,8 +204,8 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                 }}
                 sx={{
                   position: 'absolute',
-                  top: 40,
-                  right: 40,
+                  top: 20,
+                  right: 20,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -240,7 +246,7 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
               <Box
                 sx={{
                   position: 'absolute',
-                  bottom: 40,
+                  bottom: 20,
                   left: '50%',
                   transform: 'translateX(-50%)',
                   display: 'flex',
@@ -278,8 +284,8 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
               <Box
                 sx={{
                   position: 'absolute',
-                  top: 40,
-                  left: 40,
+                  top: 20,
+                  left: 20,
                   color: 'white',
                   bgcolor: 'rgba(30, 30, 47, 0.95)',
                   backdropFilter: 'blur(10px)',

@@ -10,7 +10,6 @@ export const mediaApi = api.injectEndpoints({
         extraOptions: {},
         baseQuery: BaseQueryFn<any, unknown, FetchBaseQueryError, {}, FetchBaseQueryMeta>
       ): Promise<QueryReturnValue<string, FetchBaseQueryError, FetchBaseQueryMeta>> => {
-        console.log('🔄 Starting media query for:', storageKey);
         
         try {
           // Используем прямой fetch с токеном из store
@@ -31,13 +30,6 @@ export const mediaApi = api.injectEndpoints({
             }
           });
           
-          console.log('📡 Direct fetch response:', { 
-            storageKey, 
-            status: response.status, 
-            ok: response.ok,
-            contentType: response.headers.get('content-type')
-          });
-          
           if (!response.ok) {
             return { 
               error: { 
@@ -48,14 +40,11 @@ export const mediaApi = api.injectEndpoints({
           }
           
           const blob = await response.blob();
-          console.log('📦 Blob received:', { storageKey, blobSize: blob.size, blobType: blob.type });
           
           const objectUrl = URL.createObjectURL(blob);
-          console.log('✅ Object URL created:', { storageKey, objectUrl });
           
           return { data: objectUrl };
         } catch (error) {
-          console.error('💥 Media query exception:', { storageKey, error });
           return { 
             error: { 
               status: 'FETCH_ERROR', 

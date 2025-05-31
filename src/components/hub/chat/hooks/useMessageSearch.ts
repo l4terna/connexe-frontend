@@ -26,6 +26,9 @@ interface UseMessageSearchReturn {
   handleSearchInputChange: (value: string) => void;
   handleSearchResultClick: (message: Message) => void;
   clearSearch: () => void;
+  loadMore: () => void;
+  hasMore: boolean;
+  isLoadingMore: boolean;
 }
 
 export const useMessageSearch = ({
@@ -38,22 +41,33 @@ export const useMessageSearch = ({
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [highlightedMessages, setHighlightedMessages] = useState<Set<number>>(new Set());
   const [focusedMessageId, setFocusedMessageId] = useState<number | null>(null);
+  const [beforeId, setBeforeId] = useState<number | undefined>(undefined);
+  const [allResults, setAllResults] = useState<Message[]>([]);
+  const [hasMore, setHasMore] = useState(true);
   
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchResultsRef = useRef<HTMLDivElement | null>(null);
   const searchDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Search query
-  const { data: searchResults, isLoading: isSearching } = useSearchMessagesQuery(
+  const queryArgs = {
+    channelId: channelId ?? 0,
+    search: debouncedSearchQuery,
+    size: 20,
+    ...(beforeId && { beforeId })
+  };
+  
+  const shouldSkip = !channelId || !debouncedSearchQuery || !searchMode;
+  
+  const { data: searchResults, isLoading: isSearching, isFetching } = useSearchMessagesQuery(
+    queryArgs,
     {
-      channelId: channelId ?? 0,
-      search: debouncedSearchQuery,
-      size: 20
-    },
-    {
-      skip: !channelId || !debouncedSearchQuery || !searchMode
+      skip: shouldSkip,
+      refetchOnMountOrArgChange: true
     }
   );
+  
+  const isLoadingMore = isFetching && beforeId !== undefined;
 
   // Handle search input change with debouncing
   const handleSearchInputChange = useCallback((value: string) => {
@@ -64,11 +78,17 @@ export const useMessageSearch = ({
       clearTimeout(searchDebounceTimerRef.current);
     }
 
+    // Reset pagination on new search
+    setBeforeId(undefined);
+    setAllResults([]);
+    setHasMore(true);
+
     // Set new timer for debouncing
     searchDebounceTimerRef.current = setTimeout(() => {
       setDebouncedSearchQuery(value);
       if (value.trim()) {
         setShowSearchResults(true);
+        // Don't manually refetch - let RTK Query handle it through debouncedSearchQuery change
       }
     }, 300);
   }, []);
@@ -97,7 +117,48 @@ export const useMessageSearch = ({
     setShowSearchResults(false);
     setHighlightedMessages(new Set());
     setFocusedMessageId(null);
+    setBeforeId(undefined);
+    setAllResults([]);
+    setHasMore(true);
   }, []);
+  
+  // Load more results
+  const loadMore = useCallback(() => {
+    if (hasMore && !isLoadingMore && allResults.length > 0) {
+      const lastMessage = allResults[allResults.length - 1];
+      console.log('Loading more, last message id:', lastMessage.id, 'hasMore:', hasMore);
+      setBeforeId(lastMessage.id);
+    }
+  }, [hasMore, isLoadingMore, allResults]);
+
+  // Handle search results
+  useEffect(() => {
+    if (searchResults) {
+      if (!beforeId) {
+        // First page - replace results
+        setAllResults(searchResults);
+      } else {
+        // Subsequent pages - append results without duplicates
+        setAllResults(prev => {
+          const existingIds = new Set(prev.map(msg => msg.id));
+          const newResults = searchResults.filter(msg => !existingIds.has(msg.id));
+          
+          // If no new results, it means we've reached the end
+          if (newResults.length === 0) {
+            setHasMore(false);
+          }
+          
+          return [...prev, ...newResults];
+        });
+      }
+      
+      // Check if there are more results
+      setHasMore(searchResults.length === 20);
+    } else if (!debouncedSearchQuery) {
+      // Clear results when search query is empty
+      setAllResults([]);
+    }
+  }, [searchResults, beforeId, debouncedSearchQuery]);
 
   // Handle search mode changes
   useEffect(() => {
@@ -106,6 +167,9 @@ export const useMessageSearch = ({
       setSearchQuery('');
       setDebouncedSearchQuery('');
       setShowSearchResults(false);
+      setBeforeId(undefined);
+      setAllResults([]);
+      setHasMore(true);
     }
   }, [searchMode]);
 
@@ -152,10 +216,13 @@ export const useMessageSearch = ({
     setHighlightedMessages,
     focusedMessageId,
     setFocusedMessageId,
-    searchResults,
-    isSearching,
+    searchResults: allResults,
+    isSearching: isSearching && beforeId === undefined,
     handleSearchInputChange,
     handleSearchResultClick,
-    clearSearch
+    clearSearch,
+    loadMore,
+    hasMore,
+    isLoadingMore
   };
 };

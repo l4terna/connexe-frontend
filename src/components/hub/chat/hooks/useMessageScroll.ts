@@ -7,6 +7,7 @@ interface UseMessageScrollProps {
   user: { id: number } | null;
   onScrollToBottom?: () => void;
   onMarkAllAsRead?: () => void;
+  bulkReadAllRef?: React.RefObject<number>;
 }
 
 interface UseMessageScrollReturn {
@@ -30,7 +31,8 @@ export const useMessageScroll = ({
   messages,
   activeChannel,
   onScrollToBottom,
-  onMarkAllAsRead
+  onMarkAllAsRead,
+  bulkReadAllRef
 }: UseMessageScrollProps): UseMessageScrollReturn => {
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -40,6 +42,9 @@ export const useMessageScroll = ({
   
   const dateLabelTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const previousScrollHeightRef = useRef<number>(0);
+  const previousScrollTopRef = useRef<number>(0);
+  const messagesCountRef = useRef<number>(0);
 
   // Function to scroll to bottom
   const scrollToBottom = useCallback((instant: boolean = false) => {
@@ -202,8 +207,11 @@ export const useMessageScroll = ({
         // Re-enable auto-scroll when user manually scrolls to bottom
         setDisableAutoScroll(false);
         
-        // Mark all messages as read
-        if (onMarkAllAsRead) {
+        // Mark all messages as read with debouncing (only once per 1000ms)
+        const now = Date.now();
+        if (onMarkAllAsRead && bulkReadAllRef?.current && now - lastMarkAllAsReadTime > 1000 && now - bulkReadAllRef.current > 1000) {
+          lastMarkAllAsReadTime = now;
+          bulkReadAllRef.current = now;
           onMarkAllAsRead();
         }
       }
@@ -262,7 +270,32 @@ export const useMessageScroll = ({
         clearTimeout(scrollTimeoutId);
       }
     };
-  }, [activeChannel, messages, messagesContainerRef, onMarkAllAsRead]);
+  }, [activeChannel, messages, messagesContainerRef, onMarkAllAsRead, bulkReadAllRef]);
+
+  // Effect to handle scroll correction during pagination
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const currentMessageCount = messages.length;
+    const previousMessageCount = messagesCountRef.current;
+
+    // Check if messages were added at the beginning (pagination up)
+    if (currentMessageCount > previousMessageCount && previousMessageCount > 0) {
+      const heightDifference = container.scrollHeight - previousScrollHeightRef.current;
+      
+      if (heightDifference > 0) {
+        // Preserve scroll position by adjusting for the new content height
+        const newScrollTop = previousScrollTopRef.current + heightDifference;
+        container.scrollTop = newScrollTop;
+      }
+    }
+
+    // Store current values for next comparison
+    messagesCountRef.current = currentMessageCount;
+    previousScrollHeightRef.current = container.scrollHeight;
+    previousScrollTopRef.current = container.scrollTop;
+  }, [messages.length, messagesContainerRef]);
 
   // Effect to handle scroll to bottom
   useEffect(() => {

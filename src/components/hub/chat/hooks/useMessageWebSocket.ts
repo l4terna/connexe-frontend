@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useWebSocket } from '@/websocket/useWebSocket';
 import { webSocketService } from '@/websocket/WebSocketService';
 import type { Message } from '@/api/channels';
@@ -61,6 +61,7 @@ export interface MessageWebSocketOptions {
   loadingMode: string | null;
   unreadMessagesBufferRef: React.RefObject<Set<number>>;
   addToReadBuffer: (messageId: number) => void;
+  bulkReadAllRef: React.RefObject<number>;
 }
 
 export const useMessageWebSocket = (
@@ -69,6 +70,20 @@ export const useMessageWebSocket = (
   callbacks: MessageWebSocketCallbacks,
   options: MessageWebSocketOptions
 ) => {
+  // Debouncing for bulk-read-all calls
+  const lastBulkReadAllTimeRef = useRef<number>(0);
+  
+  const debouncedBulkReadAll = useCallback(() => {
+    if (!activeChannel) return;
+    
+    const now = Date.now();
+    if (now - lastBulkReadAllTimeRef.current > 1000 && now - options.bulkReadAllRef.current > 1000) {
+      lastBulkReadAllTimeRef.current = now;
+      options.bulkReadAllRef.current = now;
+      webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
+      callbacks.onMarkAllAsRead();
+    }
+  }, [activeChannel, callbacks.onMarkAllAsRead, options.bulkReadAllRef]);
 
   const handleNewMessage = useCallback((data: WebSocketMessageData) => {
     if (data.type === 'MESSAGE_CREATE' && data.message) {
@@ -104,8 +119,7 @@ export const useMessageWebSocket = (
             }
             
             // Mark all messages as read
-            webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
-            callbacks.onMarkAllAsRead();
+            debouncedBulkReadAll();
           } else if (isScrolledUpSignificantly) {
             // User is scrolled up significantly - show indicator
             callbacks.onNewMessageIndicator(true);
@@ -133,10 +147,8 @@ export const useMessageWebSocket = (
               callbacks.onScrollToBottom();
             }
             
-            if (activeChannel) {
-              webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
-              callbacks.onMarkAllAsRead();
-            }
+            // Mark all messages as read
+            debouncedBulkReadAll();
           }
         }
       }
@@ -172,7 +184,7 @@ export const useMessageWebSocket = (
     callbacks.onMarkMessageAsRead,
     callbacks.onNewMessageIndicator,
     callbacks.onScrollToBottom,
-    callbacks.onMarkAllAsRead,
+    debouncedBulkReadAll,
     callbacks.onUnreadCountChange
   ]);
 

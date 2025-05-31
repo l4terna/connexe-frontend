@@ -47,7 +47,6 @@ const formatMessageTime = (timestamp: string) => {
 
 const formatReplyContent = (message: ReplyMessage | ExtendedMessage) => {
   // If there's text content, return it
-  console.log("mmmm", message)
   if (message.content && message.content.trim()) {
     return message.content;
   }
@@ -103,16 +102,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
   
   // Check if message has image attachments
   const hasAttachments = message.attachments && message.attachments.length > 0;
-  
-  // Debug logging
-  console.log('ChatMessageItem render:', {
-    messageId: message.id,
-    attachments: message.attachments,
-    attachmentsLength: message.attachments?.length,
-    hasAttachments,
-    attachmentsType: typeof message.attachments,
-    isArray: Array.isArray(message.attachments)
-  });
+
   
   // Handle image preview click
   const handleImageClick = (storageKey: string, index: number) => {
@@ -303,7 +293,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
         
         {/* Message content */}
         <Box sx={{ flex: 1, position: 'relative' }}>
-          <Box sx={{ maxWidth: '100%' }}>
+          <Box sx={{ maxWidth: '99%' }}>
             <Box sx={{ py: '5px', px: '0px', pl: 0 }}>
               {isFirstInGroup && (
                 <Typography sx={{ color: '#00CFFF', fontWeight: 700, mb: 0.5, fontSize: '1rem', letterSpacing: 0.2 }}>

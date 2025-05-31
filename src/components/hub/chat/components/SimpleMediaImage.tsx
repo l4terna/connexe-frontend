@@ -57,18 +57,7 @@ const SimpleMediaImage: React.FC<SimpleMediaImageProps> = ({
   const { data: imageSrc, isLoading, error } = useGetMediaUrlQuery(storageKey, {
     skip: !shouldLoad,
   });
-  
-  console.log('🖼️ SimpleMediaImage render:', { 
-    storageKey, 
-    alt, 
-    imageSrc, 
-    isLoading, 
-    error, 
-    imageError,
-    isVisible,
-    loadingMode,
-    shouldLoad 
-  });
+
 
   // Reset image error when storageKey changes
   useEffect(() => {
@@ -99,7 +88,6 @@ const SimpleMediaImage: React.FC<SimpleMediaImageProps> = ({
   }
 
   if (isLoading) {
-    console.log('🔄 Showing loading skeleton for:', storageKey);
     return (
       <Box
         ref={elementRef}
@@ -150,7 +138,6 @@ const SimpleMediaImage: React.FC<SimpleMediaImageProps> = ({
   }
 
   if (!imageSrc) {
-    console.log('⚠️ No imageSrc available for:', storageKey);
     return (
       <Box
         sx={{
@@ -171,7 +158,6 @@ const SimpleMediaImage: React.FC<SimpleMediaImageProps> = ({
     );
   }
 
-  console.log('🖼️ Rendering image:', { storageKey, imageSrc });
   return (
     <Box
       ref={elementRef}
@@ -183,9 +169,6 @@ const SimpleMediaImage: React.FC<SimpleMediaImageProps> = ({
       onError={(e) => {
         console.error('❌ Image render error:', { storageKey, imageSrc, error: e });
         setImageError(true);
-      }}
-      onLoad={() => {
-        console.log('✅ Image rendered successfully:', { storageKey, imageSrc });
       }}
       sx={{
         width: '100%',

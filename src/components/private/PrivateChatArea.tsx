@@ -20,7 +20,7 @@ import { useMessagePagination } from '../hub/chat/hooks/useMessagePagination';
 import { useMessageReadStatus } from '../hub/chat/hooks/useMessageReadStatus';
 import { useMessageScroll } from '../hub/chat/hooks/useMessageScroll';
 import { useMessageSearch } from '../hub/chat/hooks/useMessageSearch';
-import { usePrivateMessageWebSocket } from './hooks/usePrivateMessageWebSocket';
+import { useMessageWebSocket } from '../hub/chat/hooks/useMessageWebSocket';
 import { useMessageState } from '../hub/chat/hooks/useMessageState';
 import { ExtendedMessage, MessageStatus } from '../hub/chat/types/message';
 
@@ -135,7 +135,10 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
     focusedMessageId,
     setFocusedMessageId,
     searchInputRef,
-    searchResultsRef
+    searchResultsRef,
+    loadMore,
+    hasMore,
+    isLoadingMore
   } = useMessageSearch({
     channelId: activeChannel?.id,
     onSearchResultClick: (messageId: number) => {
@@ -183,8 +186,8 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
   const [targetMessageId, setTargetMessageId] = useState<number | null>(null);
   const [lastAroundId, setLastAroundId] = useState<number | null>(null);
   
-  // Использование хука WebSocket для обработки приватных сообщений
-  usePrivateMessageWebSocket(
+  // Использование хука WebSocket для обработки сообщений (аналогично хабам)
+  useMessageWebSocket(
     activeChannel,
     user,
     {
@@ -980,6 +983,7 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
     let scrollMovementStartTime = 0;
     let scrollTimeoutId: NodeJS.Timeout | null = null;
     let scrollThrottle = false;
+    let lastMarkAllAsReadTime = 0; // Дебаунсинг для markAllMessagesAsRead
 
     const handleScroll = () => {
       if (scrollThrottle) return;
@@ -1015,7 +1019,12 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
         if (isAtBottom && activeChannel) {
           setDisableAutoScroll(false);
           
-          markAllMessagesAsRead();
+          // Send bulk-read-all request with debouncing (only once per 1000ms)
+          const now = Date.now();
+          if (now - lastMarkAllAsReadTime > 1000) {
+            lastMarkAllAsReadTime = now;
+            markAllMessagesAsRead();
+          }
           
           setMessages(prev => prev.map(msg => (
             msg.author.id !== user.id 
@@ -1232,6 +1241,9 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
         handleSearchInputChange={(e: React.ChangeEvent<HTMLInputElement>) => handleSearchInputChange(e.target.value)}
         clearSearch={clearSearch}
         onSearchResultClick={handleSearchResultClick}
+        onLoadMore={loadMore}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
         isLoadingMessages={isLoading || isFetching}
         isLoadingAround={isLoadingAround}
         paginationState={{

@@ -79,6 +79,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     prepareScrollCorrection: () => void;
     setDisableSmoothScroll: (value: boolean) => void;
   }>(null);
+  const bulkReadAllRef = useRef<number>(0);
   
   // Использование хука для работы с прочитанными сообщениями
   const { markMessageAsRead, markAllMessagesAsRead, addToReadBuffer, unreadMessagesBufferRef } = useMessageReadStatus({
@@ -105,7 +106,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     messages,
     activeChannel,
     user,
-    onMarkAllAsRead: markAllMessagesAsRead
+    onMarkAllAsRead: markAllMessagesAsRead,
+    bulkReadAllRef
   });
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -136,7 +138,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     focusedMessageId,
     setFocusedMessageId,
     searchInputRef,
-    searchResultsRef
+    searchResultsRef,
+    loadMore,
+    hasMore,
+    isLoadingMore
   } = useMessageSearch({
     channelId: activeChannel?.id,
     onSearchResultClick: (messageId: number) => {
@@ -276,7 +281,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       isJumpingToMessage: paginationState.isJumpingToMessage,
       loadingMode: paginationState.loadingMode,
       unreadMessagesBufferRef,
-      addToReadBuffer
+      addToReadBuffer,
+      bulkReadAllRef
     }
   );
   
@@ -1265,6 +1271,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     let scrollMovementStartTime = 0;
     let scrollTimeoutId: NodeJS.Timeout | null = null;
     let scrollThrottle = false;
+    let lastMarkAllAsReadTime = 0; // Дебаунсинг для markAllMessagesAsRead
 
     const handleScroll = () => {
       // Throttle scroll updates
@@ -1313,8 +1320,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         // НЕ отключаем enableAfterPagination здесь!
         // Он отключится только когда получим < MESSAGES_PER_PAGE сообщений
         
-        // Send bulk-read-all request when scrolling to bottom
-        markAllMessagesAsRead();
+        // Send bulk-read-all request with debouncing (only once per 1000ms)
+        const now = Date.now();
+        if (now - lastMarkAllAsReadTime > 1000) {
+          lastMarkAllAsReadTime = now;
+          markAllMessagesAsRead();
+        }
         
         // Update all messages to READ status
         setMessages(prev => prev.map(msg => (
@@ -1554,6 +1565,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         handleSearchInputChange={handleSearchInputChange}
         clearSearch={clearSearch}
         onSearchResultClick={handleSearchResultClick}
+        onLoadMore={loadMore}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
         isLoadingMessages={isLoading || isFetching}
         isLoadingAround={isLoadingAround}
         paginationState={{

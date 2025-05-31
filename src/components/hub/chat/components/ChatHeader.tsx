@@ -19,6 +19,9 @@ interface ChatHeaderProps {
   handleSearchInputChange: (value: string) => void;
   clearSearch: () => void;
   onSearchResultClick: (message: Message) => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
   // Loading states
   isLoadingMessages?: boolean;
   isLoadingAround?: boolean;
@@ -48,6 +51,9 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   handleSearchInputChange,
   clearSearch,
   onSearchResultClick,
+  onLoadMore,
+  hasMore,
+  isLoadingMore,
   isLoadingMessages = false,
   isLoadingAround = false,
   paginationState,
@@ -101,6 +107,9 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         handleSearchInputChange={handleSearchInputChange}
         clearSearch={clearSearch}
         onSearchResultClick={onSearchResultClick}
+        onLoadMore={onLoadMore}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
       />
 
       {/* Loading indicator bar */}

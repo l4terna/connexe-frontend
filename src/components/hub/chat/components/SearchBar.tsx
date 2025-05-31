@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, IconButton, Typography, Tooltip } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
@@ -21,6 +21,9 @@ interface SearchBarProps {
   handleSearchInputChange: (value: string) => void;
   clearSearch: () => void;
   onSearchResultClick: (message: Message) => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
 }
 
 const SearchBar: React.FC<SearchBarProps> = ({
@@ -36,8 +39,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
   debouncedSearchQuery,
   handleSearchInputChange,
   clearSearch,
-  onSearchResultClick
+  onSearchResultClick,
+  onLoadMore,
+  hasMore = false,
+  isLoadingMore = false
 }) => {
+  const [displayedResults, setDisplayedResults] = useState<Message[]>([]);
+  const loadingRef = useRef(false);
+  
   const formatMessageTime = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { 
@@ -46,6 +55,32 @@ const SearchBar: React.FC<SearchBarProps> = ({
       hour12: false 
     });
   };
+
+  // Update displayed results when search results change
+  useEffect(() => {
+    if (searchResults) {
+      setDisplayedResults(searchResults);
+    }
+  }, [searchResults]);
+
+  // Handle scroll for pagination
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const scrollHeight = container.scrollHeight;
+    const scrollTop = container.scrollTop;
+    const clientHeight = container.clientHeight;
+    
+    // Check if scrolled to bottom for pagination
+    if (scrollHeight - scrollTop - clientHeight < 100) {
+      if (onLoadMore && hasMore && !isLoadingMore && !loadingRef.current) {
+        loadingRef.current = true;
+        onLoadMore();
+        setTimeout(() => {
+          loadingRef.current = false;
+        }, 1000);
+      }
+    }
+  }, [onLoadMore, hasMore, isLoadingMore]);
 
   if (!searchMode) {
     return (
@@ -78,7 +113,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
       display: 'flex', 
       flexDirection: 'column',
       position: 'relative',
-      zIndex: 1050
+      zIndex: 10001
     }}>
       <Box sx={{ 
         display: 'flex', 
@@ -115,7 +150,20 @@ const SearchBar: React.FC<SearchBarProps> = ({
                         }
                       }}
                       onBlur={(e) => {
-                        e.preventDefault();
+                        // Check if we're moving to the search results
+                        const relatedTarget = e.relatedTarget as HTMLElement;
+                        if (relatedTarget && searchResultsRef.current && !searchResultsRef.current.contains(relatedTarget)) {
+                          // Delay hiding to allow for clicks on results
+                          setTimeout(() => {
+                            if (searchResultsRef.current && !searchResultsRef.current.matches(':hover')) {
+                              setShowSearchResults(false);
+                            }
+                          }, 150);
+                        } else if (!relatedTarget) {
+                          setTimeout(() => {
+                            setShowSearchResults(false);
+                          }, 150);
+                        }
                       }}
                       placeholder="Поиск сообщений..."
                       style={{
@@ -189,20 +237,39 @@ const SearchBar: React.FC<SearchBarProps> = ({
       {showSearchResults && searchQuery.trim() && (
         <Box
           ref={searchResultsRef}
+          onMouseDown={(e) => {
+            // Prevent input blur when clicking on results
+            e.preventDefault();
+          }}
+          onMouseEnter={() => {
+            // Keep results visible when hovering
+            setShowSearchResults(true);
+          }}
+          onMouseLeave={(e) => {
+            // Only hide if not moving to input
+            const relatedTarget = e.relatedTarget as HTMLElement;
+            if (relatedTarget && searchInputRef.current && !searchInputRef.current.contains(relatedTarget)) {
+              setTimeout(() => setShowSearchResults(false), 100);
+            } else if (!relatedTarget) {
+              setTimeout(() => setShowSearchResults(false), 100);
+            }
+          }}
+          onScroll={handleScroll}
           sx={{
             position: 'absolute',
             top: '100%',
             left: 0,
             width: '100%',
             maxHeight: '300px',
-            background: 'rgba(30,30,47,0.95)',
+            background: 'rgba(20, 20, 35, 0.98)',
             border: '1px solid rgba(255,255,255,0.1)',
             borderTop: 'none',
             borderRadius: '0 0 20px 20px',
             overflowY: 'auto',
-            zIndex: 1100,
-            backdropFilter: 'blur(10px)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+            overflowX: 'hidden',
+            zIndex: 10002,
+            backdropFilter: 'blur(15px)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
             '&::-webkit-scrollbar': {
               width: '6px',
             },
@@ -252,17 +319,24 @@ const SearchBar: React.FC<SearchBarProps> = ({
           )}
           
           {/* Search results */}
-          {!isSearching && searchResults && searchResults.length > 0 && searchResults.map((msg) => (
+          {!isSearching && displayedResults && displayedResults.length > 0 && displayedResults.map((msg, index) => (
             <Box
-              key={msg.id}
-              onClick={() => onSearchResultClick(msg)}
+              key={`${msg.id}-${index}`}
+              onClick={() => {
+                onSearchResultClick(msg);
+                setShowSearchResults(false);
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+              }}
               sx={{
                 p: 2,
                 borderBottom: '1px solid rgba(255,255,255,0.05)',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
                 '&:hover': {
-                  background: 'rgba(255,255,255,0.05)',
+                  background: 'rgba(255,255,255,0.1)',
+                  transform: 'translateX(2px)',
                 },
                 '&:last-child': {
                   borderBottom: 'none',
@@ -332,6 +406,25 @@ const SearchBar: React.FC<SearchBarProps> = ({
               />
             </Box>
           ))}
+          
+          {/* Loading more indicator */}
+          {isLoadingMore && (
+            <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <Box 
+                sx={{ 
+                  width: 20, 
+                  height: 20, 
+                  border: '2px solid rgba(255,255,255,0.1)',
+                  borderTop: '2px solid #00CFFF',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                }}
+              />
+              <Typography sx={{ ml: 1, color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>
+                Загрузка...
+              </Typography>
+            </Box>
+          )}
         </Box>
       )}
     </Box>

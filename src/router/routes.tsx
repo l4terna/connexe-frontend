@@ -4,6 +4,7 @@ import AuthPage from '@/pages/AuthPage';
 import MainPage from '@/pages/MainPage';
 import HubPage from '@/pages/HubPage';
 import HubSettings from '@/pages/HubSettings';
+import PrivateChatPage from '@/pages/PrivateChatPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import RequireHubAccess from '@/components/RequireHubAccess';
 import { RequireAuth, AuthOnly } from './ProtectedRoute';
@@ -47,6 +48,10 @@ export const getRoutes = (hubPageRef: React.MutableRefObject<{ updateHubData: ()
         </RequireHubPermission>
       </RequireAuth>
     ),
+  },
+  {
+    path: '/p-channel/:channelId',
+    element: <RequireAuth><PrivateChatPage /></RequireAuth>,
   },
   {
     path: '*',

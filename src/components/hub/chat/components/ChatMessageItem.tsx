@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
-import { Box, Typography, IconButton, Tooltip, Fade, Modal } from '@mui/material';
+import { Box, Typography, IconButton, Tooltip } from '@mui/material';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import ReplyIcon from '@mui/icons-material/Reply';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import CloseIcon from '@mui/icons-material/Close';
 import UserAvatar from '../../../UserAvatar';
 import DOMPurify from 'dompurify';
-import { ExtendedMessage } from '../types/message';
+import { ExtendedMessage, ReplyMessage } from '../types/message';
 import SimpleMediaImage from './SimpleMediaImage';
 import MessageImagePreviewModal from './MessageImagePreviewModal';
 
@@ -29,6 +26,7 @@ export interface ChatMessageItemProps {
   searchQuery?: string;
   currentUserId: number;
   hubId?: number;
+  loadingMode?: 'initial' | 'pagination' | 'around' | null;
   // Callback handlers
   onReply?: (message: ExtendedMessage) => void;
   onEdit?: (message: ExtendedMessage | number) => void;
@@ -47,12 +45,39 @@ const formatMessageTime = (timestamp: string) => {
   });
 };
 
+const formatReplyContent = (message: ReplyMessage | ExtendedMessage) => {
+  // If there's text content, return it
+  console.log("mmmm", message)
+  if (message.content && message.content.trim()) {
+    return message.content;
+  }
+  
+  // If no text but has attachments, show attachment count
+  const attachmentCount = 'attachments_count' in message 
+    ? message.attachments_count 
+    : (message.attachments?.length || 0);
+
+  if (attachmentCount > 0) {
+    // For now we assume all attachments are images, but this can be extended
+    // to support different types of attachments in the future
+    if (attachmentCount === 1) {
+      return '📎 Вложение';
+    } else if (attachmentCount >= 2 && attachmentCount <= 4) {
+      return `📎 ${attachmentCount} вложения`;
+    } else {
+      return `📎 ${attachmentCount} вложений`;
+    }
+  }
+  
+  // Fallback for empty message - show as attachment since there's no content
+  return '📎 Вложение';
+};
+
 export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
   const { 
     message, 
     // Support both naming conventions
     isFirstInGroup = props.isFirstOfGroup || false,
-    isLastInGroup,
     // Original props
     isTempMessage = false,
     isHighlighted = false,
@@ -62,6 +87,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
     searchQuery = '',
     currentUserId,
     hubId = 0,
+    loadingMode = null,
     // Callback handlers
     onReply,
     onEdit,
@@ -94,29 +120,17 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
     setCurrentImageIndex(index);
   };
   
-  // Handle next/previous image in the lightbox
-  const handleNextImage = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!message.attachments) return;
-    
-    const nextIndex = (currentImageIndex + 1) % message.attachments.length;
-    setCurrentImageIndex(nextIndex);
-    setViewingImage(message.attachments[nextIndex]);
-  };
-  
-  const handlePrevImage = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!message.attachments) return;
-    
-    const prevIndex = (currentImageIndex - 1 + message.attachments.length) % message.attachments.length;
-    setCurrentImageIndex(prevIndex);
-    setViewingImage(message.attachments[prevIndex]);
-  };
 
   // Support different callback patterns
   const handleReplyClick = () => {
-    if (onReply) {
-      onReply(message);
+    if (message.reply && onReplyClick) {
+      onReplyClick(message.reply.id);
+    }
+  };
+
+  const handleReplyToClick = () => {
+    if (message && onReply) {
+      onReply(message); // Reply to this message, not the reply message
     }
   };
 
@@ -134,16 +148,6 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
       // Support both new and old callback patterns
       if (typeof onDelete === 'function') {
         onDelete(message.id);
-      }
-    }
-  };
-
-  const handleReplyToClick = () => {
-    if (message.reply) {
-      if (onReplyClick && message.reply.id) {
-        onReplyClick(message.reply.id);
-      } else if (onReply) {
-        onReply(message.reply as ExtendedMessage);
       }
     }
   };
@@ -194,7 +198,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
         }}
       >
         {/* Message Actions - positioned relative to the entire message */}
-        <Fade in={isHovered} timeout={200}>
+        {isHovered && (
           <Box
             sx={{
               position: 'absolute',
@@ -203,19 +207,25 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
               transform: 'translateX(-50%)',
               display: 'flex',
               gap: 0.5,
-              zIndex: 10,
+              zIndex: 1000,
               padding: '6px 8px',
               borderRadius: '20px',
               background: 'rgba(40, 44, 52, 0.85)',
               backdropFilter: 'blur(6px)',
               boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
               transition: 'all 0.2s ease',
+              opacity: 1,
+              animation: 'fadeIn 0.2s ease-in-out',
+              '@keyframes fadeIn': {
+                from: { opacity: 0, transform: 'translateX(-50%) translateY(5px)' },
+                to: { opacity: 1, transform: 'translateX(-50%) translateY(0)' }
+              }
             }}
           >
             <Tooltip title="Ответить" enterDelay={1000} placement="top">
               <IconButton 
                 size="small" 
-                onClick={handleReplyClick}
+                onClick={handleReplyToClick}
                 sx={{ 
                   color: '#00CFFF', 
                   transition: 'all 0.2s ease',
@@ -267,7 +277,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
               </>
             )}
           </Box>
-        </Fade>
+        )}
         
         {/* Avatar column */}
         <Box
@@ -306,46 +316,36 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                 <Box
                   sx={{
                     display: 'flex',
-                    gap: 1,
-                    mt: 0.5,
-                    mb: 1.5,
-                    py: 1,
-                    px: 1.5,
-                    backgroundColor: 'rgba(0, 207, 255, 0.05)',
-                    borderLeft: '3px solid #00CFFF',
-                    borderRadius: '0 5px 5px 0',
-                    fontSize: '0.95rem',
-                    maxWidth: '98%',
+                    flexDirection: 'column',
+                    borderRadius: '4px',
+                    p: 1,
+                    background: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                    mb: 1,
+                    mt: 0.25,
                     cursor: 'pointer',
-                    transition: 'background-color 0.15s ease',
                     '&:hover': {
-                      backgroundColor: 'rgba(0, 207, 255, 0.1)'
+                      background: 'rgba(255,255,255,0.06)',
                     }
                   }}
-                  onClick={handleReplyToClick}
+                  onClick={handleReplyClick}
                 >
-                  <ReplyIcon sx={{ color: '#00CFFF', fontSize: '0.85rem', mt: '2px' }} />
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography sx={{ 
-                      color: '#00CFFF', 
-                      fontWeight: 500,
-                      fontSize: '0.85rem',
-                      mb: 0.5
-                    }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <ReplyIcon sx={{ fontSize: '0.9rem', color: '#00CFFF' }} />
+                    <Typography sx={{ color: '#00CFFF', fontSize: '0.82rem', fontWeight: '500' }}>
                       {message.reply.author.login}
                     </Typography>
-                    <Typography sx={{ 
-                      color: 'rgba(255,255,255,0.7)', 
-                      fontSize: '0.85rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical'
-                    }}>
-                      {message.reply.content}
-                    </Typography>
                   </Box>
+                  <Typography sx={{ 
+                    color: 'rgba(255,255,255,0.7)', 
+                    fontSize: '0.82rem', 
+                    mt: 0.3, 
+                    lineHeight: 1.3 
+                  }} 
+                  noWrap
+                  >
+                    {formatReplyContent(message.reply)}
+                  </Typography>
                 </Box>
               )}
             </Box>
@@ -381,37 +381,52 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                       }}
                       onClick={() => handleImageClick(message.attachments[0], 0)}
                     >
-                      <SimpleMediaImage
-                        storageKey={message.attachments[0]}
-                        className="attachment-image"
-                        alt="Attachment"
-                        sx={{
-                          width: '100%',
-                          height: 'auto',
-                          maxHeight: '400px',
-                          objectFit: 'cover',
-                          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                        }}
-                      />
                       <Box
-                        className="zoom-overlay"
                         sx={{
-                          position: 'absolute',
-                          inset: 0,
-                          background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          opacity: 0,
-                          transition: 'opacity 0.3s ease',
-                          backdropFilter: 'blur(3px)',
+                          position: 'relative',
+                          width: '100%',
+                          paddingTop: '75%', // 4:3 aspect ratio
+                          '& > *': {
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                          }
                         }}
                       >
-                        <ZoomInIcon sx={{ 
-                          color: 'white', 
-                          fontSize: '36px',
-                          filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))'
-                        }} />
+                        <SimpleMediaImage
+                          storageKey={message.attachments[0]}
+                          className="attachment-image"
+                          alt="Attachment"
+                          loadingMode={loadingMode}
+                          sx={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          }}
+                        />
+                        <Box
+                          className="zoom-overlay"
+                          sx={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0,
+                            transition: 'opacity 0.3s ease',
+                            backdropFilter: 'blur(3px)',
+                          }}
+                        >
+                          <ZoomInIcon sx={{ 
+                            color: 'white', 
+                            fontSize: '36px',
+                            filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))'
+                          }} />
+                        </Box>
                       </Box>
                     </Box>
                   );
@@ -445,7 +460,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           }}
                           onClick={() => handleImageClick(attachment, index)}
                         >
-                          <SimpleMediaImage
+                          <SimpleMediaImage loadingMode={loadingMode}
                             storageKey={attachment}
                             className="attachment-image"
                             alt="Attachment"
@@ -526,7 +541,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                         }}
                         onClick={() => handleImageClick(message.attachments[0], 0)}
                       >
-                        <SimpleMediaImage
+                        <SimpleMediaImage loadingMode={loadingMode}
                           storageKey={message.attachments[0]}
                           className="attachment-image"
                           alt="Attachment"
@@ -601,7 +616,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             }}
                             onClick={() => handleImageClick(attachment, index + 1)}
                           >
-                            <SimpleMediaImage
+                            <SimpleMediaImage loadingMode={loadingMode}
                               storageKey={attachment}
                               className="attachment-image"
                               alt="Attachment"
@@ -690,7 +705,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           }}
                           onClick={() => handleImageClick(attachment, index)}
                         >
-                          <SimpleMediaImage
+                          <SimpleMediaImage loadingMode={loadingMode}
                             storageKey={attachment}
                             className="attachment-image"
                             alt="Attachment"
@@ -777,7 +792,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                         }}
                         onClick={() => handleImageClick(message.attachments[0], 0)}
                       >
-                        <SimpleMediaImage
+                        <SimpleMediaImage loadingMode={loadingMode}
                           storageKey={message.attachments[0]}
                           className="attachment-image"
                           alt="Attachment"
@@ -853,7 +868,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             }}
                             onClick={() => handleImageClick(attachment, index + 1)}
                           >
-                            <SimpleMediaImage
+                            <SimpleMediaImage loadingMode={loadingMode}
                               storageKey={attachment}
                               className="attachment-image"
                               alt="Attachment"

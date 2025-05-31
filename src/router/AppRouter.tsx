@@ -16,6 +16,7 @@ const AuthPage = lazy(() => import('@/pages/AuthPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const AllHubsPage = lazy(() => import('@/pages/AllHubsPage'));
 const AllChatsPage = lazy(() => import('@/pages/AllChatsPage'));
+const PrivateChatPage = lazy(() => import('@/pages/PrivateChatPage'));
 
 interface AppRouterProps {
   hubPageRef: React.MutableRefObject<{ updateHubData: () => Promise<void> }>;
@@ -76,6 +77,12 @@ const AppRouter: React.FC<AppRouterProps> = ({ hubPageRef }) => {
                     <HubSettings hubPageRef={hubPageRef} />
                   </Suspense>
                 </RequireHubPermission>
+              } />
+              
+              <Route path="/p-channel/:channelId" element={
+                <Suspense fallback={null}>
+                  <PrivateChatPage />
+                </Suspense>
               } />
             </Route>
             

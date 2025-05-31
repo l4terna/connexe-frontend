@@ -17,7 +17,19 @@ export interface Message {
   last_modified_at?: string;
   attachments: string[];
   read_by_count?: number;
-  reply?: Message;
+  reply?: ExtendedMessage | null;
+}
+
+export interface ReplyMessage {
+  id: number;
+  content: string;
+  attachments_count: number;
+  author: {
+    id: number;
+    login: string;
+    avatar: string | null;
+  };
+  channel_id: number;
 }
 
 export interface ExtendedMessage extends Message {

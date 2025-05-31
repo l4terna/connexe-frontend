@@ -6,7 +6,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ReplyIcon from '@mui/icons-material/Reply';
 import ErrorIcon from '@mui/icons-material/Error';
 import ImageIcon from '@mui/icons-material/Image';
-import { Formik, Form, Field } from 'formik';
+import { Formik, Form, Field, FormikProps } from 'formik';
 import * as Yup from 'yup';
 import Input from '../../../common/Input';
 import { Channel } from '../../../../api/channels';
@@ -75,6 +75,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const formikRef = useRef<FormikProps<{ content: string }> | null>(null);
   const [selectedImages, setSelectedImages] = useState<ImageFile[]>([]);
   const [fullscreenImageIndex, setFullscreenImageIndex] = useState<number | null>(null);
 
@@ -87,6 +88,116 @@ const MessageInput: React.FC<MessageInputProps> = ({
       inputRef.current.setSelectionRange(length, length);
     }
   }, [activeChannel]);
+
+  // Focus input when reply mode is activated
+  useEffect(() => {
+    if (replyingToMessage && inputRef.current) {
+      inputRef.current.focus();
+      // Place cursor at the end
+      const length = inputRef.current.value.length;
+      inputRef.current.setSelectionRange(length, length);
+    }
+  }, [replyingToMessage]);
+
+  // Handle Escape key to cancel reply
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && replyingToMessage) {
+        onReplyCancel();
+      }
+    };
+
+    // Add event listener to document to catch Escape anywhere
+    document.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [replyingToMessage, onReplyCancel]);
+
+  // Handle paste events for image insertion
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      
+      const items = Array.from(e.clipboardData.items);
+      const imageItems = items.filter(item => item.type.startsWith('image/'));
+      
+      if (imageItems.length === 0) return;
+      
+      // Don't add more images if already at max
+      if (selectedImages.length >= MAX_IMAGES) {
+        return;
+      }
+      
+      // Prevent default paste behavior for images
+      e.preventDefault();
+      
+      // Process pasted images
+      const newImagesToAdd: ImageFile[] = [];
+      
+      imageItems.slice(0, MAX_IMAGES - selectedImages.length).forEach(item => {
+        const file = item.getAsFile();
+        if (!file) return;
+        
+        // Check for duplicate based on file size and type
+        const isDuplicate = selectedImages.some(existingImage => 
+          existingImage.file.size === file.size && 
+          existingImage.file.type === file.type &&
+          existingImage.file.lastModified === file.lastModified
+        );
+        
+        if (isDuplicate) {
+          console.log('Duplicate image detected, skipping');
+          return;
+        }
+        
+        // Create a synthetic filename with timestamp and random component
+        const timestamp = new Date().getTime();
+        const random = Math.random().toString(36).substring(2, 8);
+        const extension = file.type.split('/')[1] || 'png';
+        const syntheticFile = new File([file], `pasted-image-${timestamp}-${random}.${extension}`, {
+          type: file.type,
+          lastModified: file.lastModified || Date.now()
+        });
+        
+        // Validate file type
+        const isValidType = ALLOWED_IMAGE_TYPES.includes(syntheticFile.type);
+        
+        // Validate file size
+        const isValidSize = syntheticFile.size <= MAX_IMAGE_SIZE;
+        
+        // Create image object with validation results
+        const newImage = {
+          file: syntheticFile,
+          preview: URL.createObjectURL(syntheticFile),
+          valid: isValidType && isValidSize,
+          error: !isValidType 
+            ? 'Неподдерживаемый формат файла' 
+            : !isValidSize 
+            ? 'Файл слишком большой (макс. 15MB)' 
+            : undefined
+        };
+        
+        newImagesToAdd.push(newImage);
+      });
+      
+      // Add all new images at once
+      if (newImagesToAdd.length > 0) {
+        setSelectedImages(prev => [...prev, ...newImagesToAdd]);
+      }
+    };
+    
+    // Add event listener to the input field
+    const inputElement = inputRef.current;
+    if (inputElement) {
+      inputElement.addEventListener('paste', handlePaste);
+      
+      return () => {
+        inputElement.removeEventListener('paste', handlePaste);
+      };
+    }
+  }, [selectedImages.length]);
   
   // Clean up image previews when component unmounts
   useEffect(() => {
@@ -101,6 +212,30 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (replyingToMessage && onReplyClick) {
       onReplyClick(replyingToMessage.id);
     }
+  };
+
+  const formatReplyContent = (message: ExtendedMessage) => {
+    // If there's text content, return it
+    if (message.content && message.content.trim()) {
+      return truncateContent(message.content);
+    }
+    
+    // If no text but has attachments, show attachment count
+    const attachmentCount = message.attachments?.length || 0;
+    if (attachmentCount > 0) {
+      // For now we assume all attachments are images, but this can be extended
+      // to support different types of attachments in the future
+      if (attachmentCount === 1) {
+        return '📎 Вложение';
+      } else if (attachmentCount >= 2 && attachmentCount <= 4) {
+        return `📎 ${attachmentCount} вложения`;
+      } else {
+        return `📎 ${attachmentCount} вложений`;
+      }
+    }
+    
+    // Fallback for empty message - show as attachment since there's no content
+    return '📎 Вложение';
   };
 
   const truncateContent = (content: string) => {
@@ -136,8 +271,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
       return;
     }
     
-    // Process each file with validation
-    const newImages = files.slice(0, MAX_IMAGES - selectedImages.length).map(file => {
+    // Process each file with validation and duplicate check
+    const newImages: ImageFile[] = [];
+    
+    files.slice(0, MAX_IMAGES - selectedImages.length).forEach(file => {
+      // Check for duplicate based on file size, type, and last modified
+      const isDuplicate = selectedImages.some(existingImage => 
+        existingImage.file.size === file.size && 
+        existingImage.file.type === file.type &&
+        existingImage.file.name === file.name &&
+        existingImage.file.lastModified === file.lastModified
+      );
+      
+      if (isDuplicate) {
+        console.log('Duplicate file detected, skipping:', file.name);
+        return;
+      }
+      
       // Validate file type
       const isValidType = ALLOWED_IMAGE_TYPES.includes(file.type);
       
@@ -145,7 +295,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       const isValidSize = file.size <= MAX_IMAGE_SIZE;
       
       // Create image object with validation results
-      return {
+      const imageFile: ImageFile = {
         file,
         preview: URL.createObjectURL(file),
         valid: isValidType && isValidSize,
@@ -155,10 +305,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
           ? 'Файл слишком большой (макс. 15MB)' 
           : undefined
       };
+      
+      newImages.push(imageFile);
     });
     
     // Add new images to the selected images array
-    setSelectedImages(prev => [...prev, ...newImages]);
+    if (newImages.length > 0) {
+      setSelectedImages(prev => [...prev, ...newImages]);
+    }
   };
   
   // Handler to remove an image
@@ -247,7 +401,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     wordBreak: 'break-word'
                   }}
                 >
-                  {truncateContent(replyingToMessage.content)}
+                  {formatReplyContent(replyingToMessage)}
                 </Typography>
               </Box>
               <IconButton 
@@ -401,26 +555,32 @@ const MessageInput: React.FC<MessageInputProps> = ({
             }}
           >
             <Formik
+              innerRef={formikRef}
               initialValues={{ content: '' }}
               validationSchema={messageSchema}
-              onSubmit={(values, formikHelpers) => {
+              onSubmit={async (values, formikHelpers) => {
                 // Get valid images
                 const validImages = selectedImages
                   .filter(img => img.valid)
                   .map(img => img.file);
                 
-                // Call onSendMessage with content and images
-                onSendMessage(
-                  { 
-                    content: values.content, 
-                    images: validImages.length > 0 ? validImages : undefined 
-                  }, 
-                  formikHelpers
-                );
-                
-                // Clear selected images after sending
-                selectedImages.forEach(img => URL.revokeObjectURL(img.preview));
-                setSelectedImages([]);
+                try {
+                  // Call onSendMessage with content and images
+                  await onSendMessage(
+                    { 
+                      content: values.content, 
+                      images: validImages.length > 0 ? validImages : undefined 
+                    }, 
+                    formikHelpers
+                  );
+                  
+                  // Clear images only on successful send
+                  selectedImages.forEach(img => URL.revokeObjectURL(img.preview));
+                  setSelectedImages([]);
+                } catch (error) {
+                  // On error, just log it - let the parent handle the error display
+                  console.error('Error sending message:', error);
+                }
               }}
             >
               {({ handleSubmit, values }) => (

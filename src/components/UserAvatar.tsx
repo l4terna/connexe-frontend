@@ -4,7 +4,7 @@ import { styled } from '@mui/material/styles';
 import { createPortal } from 'react-dom';
 import UserProfileContainer from './hub/members/UserProfileContainer';
 
-const StyledUserAvatar = styled(Avatar)<AvatarProps>(({ theme }) => ({
+const StyledUserAvatar = styled(Avatar)<AvatarProps & { disabled?: boolean }>(({ disabled }) => ({
   width: 40,
   height: 40,
   position: 'relative',
@@ -13,13 +13,13 @@ const StyledUserAvatar = styled(Avatar)<AvatarProps>(({ theme }) => ({
   fontWeight: 700,
   color: '#fff',
   transition: 'all 0.3s',
-  cursor: 'pointer',
+  cursor: disabled ? 'default' : 'pointer',
   lineHeight: '40px', // Same as height for vertical centering
   textAlign: 'center',
   '&:hover': {
     borderColor: 'transparent',
-    transform: 'scale(1.05)',
-    cursor: 'pointer',
+    transform: disabled ? 'none' : 'scale(1.05)',
+    cursor: disabled ? 'default' : 'pointer',
   },
 }));
 
@@ -34,13 +34,18 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
   const [anchorPoint, setAnchorPoint] = useState<{ x: number; y: number } | null>(null);
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
-    if (!userId || !hubId || disableClick) return;
+    if (!userId || disableClick) return;
     
-    const rect = event.currentTarget.getBoundingClientRect();
-    setAnchorPoint({
-      x: rect.left + window.scrollX - 300,
-      y: rect.top + window.scrollY
-    });
+    // Show profile in hub context (hubId > 0)
+    if (hubId && hubId > 0) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      setAnchorPoint({
+        x: rect.left + window.scrollX - 300,
+        y: rect.top + window.scrollY
+      });
+    }
+    // In private chats (hubId=0 or undefined), currently do nothing
+    // Could implement private chat user info modal here in the future
   };
 
   const handleClose = () => {
@@ -53,6 +58,7 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
         src={src}
         alt={alt}
         onClick={handleClick}
+        disabled={!userId || disableClick}
         {...rest}
         sx={{
           ...rest.sx,
@@ -73,7 +79,7 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
           </span>
         ) : '?'}
       </StyledUserAvatar>
-      {userId && hubId && anchorPoint && createPortal(
+      {userId && hubId && hubId > 0 && anchorPoint ? createPortal(
         <UserProfileContainer
           userId={userId}
           hubId={hubId}
@@ -81,7 +87,7 @@ const UserAvatar: React.FC<UserAvatarProps> = (props) => {
           onClose={handleClose}
         />,
         document.body
-      )}
+      ) : null}
     </>
   );
 };

@@ -58,8 +58,8 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({ open, onClose, onStar
     if (onStartChat) {
       onStartChat(user);
     } else {
-      // Default behavior - navigate to chat
-      navigate(`/chat/${user.id}`);
+      // Default behavior - navigate to p-channel with user id
+      navigate(`/p-channel/${user.id}`);
     }
     handleModalClose();
   };

@@ -3,7 +3,8 @@ import { User } from '@/api/users';
 
 export enum ChannelType {
   VOICE = 0,
-  TEXT = 1
+  TEXT = 1,
+  PRIVATE = 2
 }
 
 export interface Channel {
@@ -13,6 +14,17 @@ export interface Channel {
   categoryId: number;
   position?: number;
   isDeleted?: boolean;
+}
+
+export interface PrivateChannel {
+  id: number;
+  name: string | null;
+  type: number;
+  category_id: number | null;
+  position: number | null;
+  members?: User[];
+  lastMessage?: Message;
+  createdAt?: string;
 }
 
 export interface CreateChannelDto {
@@ -48,6 +60,45 @@ export interface CategoryWithChannels {
 
 export const channelsApi = api.injectEndpoints({
   endpoints: (builder) => ({
+    getPrivateChannels: builder.query<PrivateChannel[], void>({
+      query: () => ({
+        url: `/api/v1/channels`,
+        method: 'GET',
+      }),
+      transformResponse: (response: any) => {
+        // Handle different possible response formats
+        if (Array.isArray(response)) {
+          return response;
+        }
+        // If response has a 'data' property that's an array
+        if (response?.data && Array.isArray(response.data)) {
+          return response.data;
+        }
+        // If response has a 'content' property (paginated response)
+        if (response?.content && Array.isArray(response.content)) {
+          return response.content;
+        }
+        // If response is null/undefined or not in expected format
+        console.warn('Unexpected response format for getPrivateChannels:', response);
+        return [];
+      },
+      providesTags: ['Channel'],
+    }),
+    getPrivateChannelDetails: builder.query<PrivateChannel & { members: User[] }, number>({
+      query: (channelId) => ({
+        url: `/api/v1/channels/${channelId}`,
+        method: 'GET',
+      }),
+      providesTags: ['Channel'],
+    }),
+    createPrivateChannel: builder.mutation<PrivateChannel, { members: number[] }>({
+      query: ({ members }) => ({
+        url: `/api/v1/channels`,
+        method: 'POST',
+        body: { members }
+      }),
+      invalidatesTags: ['Channel']
+    }),
     createChannel: builder.mutation<Channel, { hubId: number; categoryId: number; data: CreateChannelDto }>({
       query: ({ hubId, data }) => ({
         url: `/api/v1/hubs/${hubId}/channels`,
@@ -194,6 +245,9 @@ export const channelsApi = api.injectEndpoints({
 });
 
 export const {
+  useGetPrivateChannelsQuery,
+  useGetPrivateChannelDetailsQuery,
+  useCreatePrivateChannelMutation,
   useCreateChannelMutation,
   useUpdateChannelMutation,
   useDeleteChannelMutation,

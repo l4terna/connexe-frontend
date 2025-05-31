@@ -9,6 +9,9 @@ export interface User {
   status?: string;
   online?: boolean;
   presence?: string;
+  email?: string;
+  created_at?: string;
+  last_activity?: string;
 }
 
 export interface HubMember {

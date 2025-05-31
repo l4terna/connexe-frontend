@@ -122,7 +122,7 @@ const AllChatsPage = () => {
         },
       }}
     >
-      <ListItemButton onClick={() => navigate(`/chat/${chat.id}`)}>
+      <ListItemButton onClick={() => {/* Chat navigation disabled */}}>
         <ListItemAvatar>
           <Badge
             overlap="circular"
@@ -316,7 +316,7 @@ const AllChatsPage = () => {
         {/* Floating Action Button */}
         <Fab
           color="primary"
-          onClick={() => navigate('/chats/new')}
+          onClick={() => {/* Create new chat disabled */}}
           sx={{
             position: 'fixed',
             bottom: 24,

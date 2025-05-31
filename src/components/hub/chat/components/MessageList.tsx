@@ -63,7 +63,7 @@ interface MessageListProps {
   isLoadingAround: boolean;
   editingMessageId: number | null;
   user: { id: number; login: string; avatar: string | null };
-  hubId: number;
+  hubId?: number;
   paginationState: {
     loadingMode: LoadingMode;
     isJumpingToMessage: boolean;
@@ -353,7 +353,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
             justifyContent: 'center',
             alignItems: 'center',
             my: 2,
-            zIndex: 1,
+            zIndex: 0,
           }}
         >
           <Box
@@ -545,6 +545,7 @@ const MessageList: React.FC<MessageListProps> = (props) => {
           right: 0,
           minHeight: size,
           px: 3,
+          overflow: 'visible',
         }}
       >
         <ChatMessageItem
@@ -558,16 +559,23 @@ const MessageList: React.FC<MessageListProps> = (props) => {
           searchQuery={searchQuery}
           currentUserId={user.id}
           hubId={hubId}
+          loadingMode={paginationState.loadingMode}
           onReply={(message) => {
             setReplyingToMessage(message);
           }}
           onEdit={(messageId) => setEditingMessageId(typeof messageId === 'number' ? messageId : messageId.id)}
           onDelete={(messageId) => handleDeleteMessage(typeof messageId === 'number' ? messageId : messageId.id)}
           onReplyClick={handleReplyClick}
+          onMouseEnter={() => {
+            // Можно добавить дополнительную логику при наведении
+          }}
+          onMouseLeave={() => {
+            // Можно добавить дополнительную логику при уходе мыши
+          }}
         />
       </Box>
     );
-  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, handleEditMessage, measureElement]);
+  }, [processedItems, getPreviousMessage, editingMessageId, highlightedMessages, unreadMessages, focusedMessageId, searchMode, searchQuery, user.id, hubId, paginationState.loadingMode, setReplyingToMessage, setEditingMessageId, handleDeleteMessage, handleReplyClick, handleEditMessage, measureElement]);
 
   // Effect to handle scroll to message when ref changes
   useEffect(() => {

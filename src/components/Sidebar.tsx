@@ -22,8 +22,8 @@ import ChatIcon from '@mui/icons-material/Chat';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AddIcon from '@mui/icons-material/Add';
 import { useLogoutMutation } from '../api/auth';
-import { useGetCurrentUserQuery } from '../api/users';
 import { useGetHubsQuery, useCreateHubMutation } from '../api/hubs';
+import { useGetPrivateChannelsQuery, useCreatePrivateChannelMutation, PrivateChannel } from '../api/channels';
 import { useAppSelector } from '../hooks/redux';
 import { Formik, Form } from 'formik';
 import * as Yup from 'yup';
@@ -33,6 +33,8 @@ import UserSearchModal from './modals/UserSearchModal';
 import SimpleBar from 'simplebar-react';
 import 'simplebar-react/dist/simplebar.min.css';
 import { gradients } from '../theme/theme';
+import PrivateChannelItem from './PrivateChannelItem';
+import UserAvatar from './UserAvatar';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -40,15 +42,30 @@ const Sidebar = () => {
   const user = useAppSelector((state) => state.user.currentUser);
   const [logoutMutation] = useLogoutMutation();
   const [createHub] = useCreateHubMutation();
+  const [createPrivateChannel] = useCreatePrivateChannelMutation();
   const [activeSection, setActiveSection] = useState('hubs');
   const [createHubOpen, setCreateHubOpen] = useState(false);
   const [createHubLoading, setCreateHubLoading] = useState(false);
   const [hubSearchOpen, setHubSearchOpen] = useState(false);
   const [userSearchOpen, setUserSearchOpen] = useState(false);
+  
+  // Получаем ID хаба из URL
+  const currentHubId = React.useMemo(() => {
+    const match = location.pathname.match(/^\/hub\/(\d+)/);
+    return match ? parseInt(match[1]) : null;
+  }, [location.pathname]);
 
-  const { data: userData } = useGetCurrentUserQuery(undefined, {
-    skip: !user?.id,
-  });
+  // Автоматически переключаем активный раздел в зависимости от роута
+  React.useEffect(() => {
+    if (location.pathname.startsWith('/hub/')) {
+      setActiveSection('hubs');
+    } else if (location.pathname.startsWith('/p-channel/')) {
+      setActiveSection('chats');
+    } else if (location.pathname === '/') {
+      // На главной странице не меняем активный раздел
+    }
+  }, [location.pathname]);
+
 
   const { data: hubsData = [], isLoading: hubsLoading, refetch } = useGetHubsQuery({
     page: 0,
@@ -98,12 +115,19 @@ const Sidebar = () => {
     }
   };
 
-  // Mock data for chats (пока нет API для чатов)
-  const mockChats = [
-    { id: 1, name: 'Иван Петров', avatar: 'https://i.pravatar.cc/150?u=1', unread: 3, online: true },
-    { id: 2, name: 'Мария Иванова', avatar: 'https://i.pravatar.cc/150?u=2', unread: 0, online: false },
-    { id: 3, name: 'Дизайн команда', avatar: 'https://i.pravatar.cc/150?u=3', unread: 12, online: true },
-  ];
+  // Get private channels only when chats section is active
+  const { data: privateChannelsData, isLoading: chatsLoading } = useGetPrivateChannelsQuery(undefined, {
+    skip: activeSection !== 'chats', // Only fetch when chats section is active
+  });
+  
+  // Ensure privateChannels is always an array
+  const privateChannels: PrivateChannel[] = React.useMemo(() => {
+    if (Array.isArray(privateChannelsData)) {
+      return privateChannelsData;
+    }
+    console.warn('privateChannels is not an array:', privateChannelsData);
+    return [];
+  }, [privateChannelsData]);
 
   const NavItem = ({ children, to, active, onClick, title, sx = {} }: any) => (
     <Tooltip title={title} placement="right">
@@ -213,6 +237,22 @@ const Sidebar = () => {
           active={activeSection === 'hubs'} 
           onClick={() => setActiveSection('hubs')}
           title="Мои хабы"
+          sx={activeSection === 'hubs' ? {
+            background: 'linear-gradient(135deg, rgba(194,24,91,0.2) 0%, rgba(25,118,210,0.2) 100%)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255,105,180,0.3)',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              inset: -1,
+              borderRadius: 3,
+              padding: 1,
+              background: 'linear-gradient(135deg, #FF69B4, #1976D2)',
+              mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+              maskComposite: 'exclude',
+              opacity: 0.5,
+            }
+          } : {}}
         >
           <TagIcon />
         </NavItem>
@@ -220,10 +260,25 @@ const Sidebar = () => {
           active={activeSection === 'chats'} 
           onClick={() => setActiveSection('chats')}
           title="Личные чаты"
+          sx={activeSection === 'chats' ? {
+            background: 'linear-gradient(135deg, rgba(194,24,91,0.2) 0%, rgba(25,118,210,0.2) 100%)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255,105,180,0.3)',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              inset: -1,
+              borderRadius: 3,
+              padding: 1,
+              background: 'linear-gradient(135deg, #FF69B4, #1976D2)',
+              mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+              maskComposite: 'exclude',
+              opacity: 0.5,
+            }
+          } : {}}
         >
-          <Badge badgeContent={15} color="error">
             <ChatIcon />
-          </Badge>
+          
         </NavItem>
       </Box>
 
@@ -284,7 +339,7 @@ const Sidebar = () => {
                   {hubsData.map((hub) => (
                     <NavItem 
                       key={hub.id}
-                      active={location.pathname === `/hub/${hub.id}`}
+                      active={currentHubId === hub.id}
                       to={`/hub/${hub.id}`}
                       title={hub.name}
                     >
@@ -320,41 +375,94 @@ const Sidebar = () => {
             </NavItem>
             
             {/* Chats list */}
-            {mockChats.map((chat) => (
-              <Box key={chat.id} sx={{ position: 'relative' }}>
-                <NavItem 
-                  active={location.pathname === `/chat/${chat.id}`}
-                  to={`/chat/${chat.id}`}
-                  title={chat.name}
-                >
-                  <Badge badgeContent={chat.unread} color="error">
-                    <Avatar 
-                      src={chat.avatar} 
-                      sx={{ 
-                        width: 30, 
-                        height: 30,
-                        border: '2px solid',
-                        borderColor: chat.online ? '#4caf50' : 'transparent',
-                      }} 
-                    />
-                  </Badge>
-                </NavItem>
-                {chat.online && (
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      bottom: 12,
-                      right: 12,
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: '#4caf50',
-                      border: '2px solid #0d0d1a',
-                    }}
+            {chatsLoading ? (
+              [1, 2, 3].map((i) => (
+                <Skeleton
+                  key={i}
+                  variant="circular"
+                  width={50}
+                  height={50}
+                  sx={{
+                    bgcolor: 'rgba(255,255,255,0.1)',
+                  }}
+                  animation="wave"
+                />
+              ))
+            ) : (
+              privateChannels.map((channel) => {
+                // For private channels (type = 2), show user avatar
+                if (channel.type === 2 && channel.members && channel.members.length > 0) {
+                  // Get the other user (not the current user)
+                  const otherUser = channel.members.find(member => member.id !== user?.id) || channel.members[0];
+                  
+                  return (
+                    <NavItem
+                      key={channel.id}
+                      active={location.pathname === `/p-channel/${channel.id}`}
+                      onClick={() => navigate(`/p-channel/${channel.id}`, { state: { otherUser } })}
+                      title={otherUser.login}
+                      sx={{
+                        background: 'transparent',
+                        border: 'none',
+                        boxShadow: 'none',
+                        cursor: 'pointer',
+                        '&:hover': {
+                          background: 'transparent',
+                          transform: 'scale(1.1)',
+                          boxShadow: 'none',
+                        }
+                      }}
+                    >
+                      <Box sx={{ position: 'relative' }}>
+                        <UserAvatar
+                          userId={otherUser.id}
+                          src={otherUser.avatar || undefined}
+                          alt={otherUser.login}
+                          sx={{ 
+                            width: 50, 
+                            height: 50,
+                            cursor: 'pointer',
+                            borderRadius: '50%',
+                            border: location.pathname === `/p-channel/${channel.id}` 
+                              ? '2px solid #FF69B4' 
+                              : '2px solid transparent',
+                            transition: 'border-color 0.3s ease',
+                            '&:hover': {
+                              cursor: 'pointer',
+                            }
+                          }}
+                          disableClick
+                        />
+                        {/* Online status indicator */}
+                        {otherUser.presence === 'ONLINE' && (
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              bottom: 0,
+                              right: 0,
+                              width: 14,
+                              height: 14,
+                              backgroundColor: '#44b700',
+                              borderRadius: '50%',
+                              border: '2px solid #1a1a2e',
+                            }}
+                          />
+                        )}
+                      </Box>
+                    </NavItem>
+                  );
+                }
+                
+                // Fallback for other channel types
+                return (
+                  <PrivateChannelItem 
+                    key={channel.id}
+                    channelId={channel.id}
+                    channelName={channel.name}
                   />
-                )}
-              </Box>
-            ))}
+                );
+              })
+            )}
           </Box>
         )}
       </Box>
@@ -500,10 +608,31 @@ const Sidebar = () => {
     <UserSearchModal 
       open={userSearchOpen}
       onClose={() => setUserSearchOpen(false)}
-      onStartChat={(user) => {
-        // Navigate to chat with user
-        navigate(`/chat/${user.id}`);
-        setUserSearchOpen(false);
+      onStartChat={async (selectedUser) => {
+        try {
+          // Создаем приватный канал с выбранным пользователем
+          const result = await createPrivateChannel({ 
+            members: [selectedUser.id] 
+          }).unwrap();
+          
+          // Переходим к созданному/существующему каналу
+          navigate(`/p-channel/${result.id}`, { state: { otherUser: selectedUser } });
+          setUserSearchOpen(false);
+        } catch (error) {
+          console.error('Failed to create private channel:', error);
+          // Если канал уже существует, API может вернуть его
+          // Попробуем найти существующий канал в списке
+          const existingChannel = privateChannels.find(channel => 
+            channel.type === 2 && 
+            channel.members?.some(member => member.id === selectedUser.id)
+          );
+          
+          if (existingChannel) {
+            const otherUser = existingChannel.members?.find(member => member.id === selectedUser.id);
+            navigate(`/p-channel/${existingChannel.id}`, { state: { otherUser: otherUser || selectedUser } });
+            setUserSearchOpen(false);
+          }
+        }
       }}
     />
     </>

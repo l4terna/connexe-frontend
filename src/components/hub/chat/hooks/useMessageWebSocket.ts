@@ -2,19 +2,7 @@ import { useCallback, useRef } from 'react';
 import { useWebSocket } from '@/websocket/useWebSocket';
 import { webSocketService } from '@/websocket/WebSocketService';
 import type { Message } from '@/api/channels';
-
-// Enum для статусов сообщений
-enum MessageStatus {
-  SENT = 0,
-  READ = 1,
-  NEW = 2
-}
-
-// Интерфейс расширенного сообщения
-export interface ExtendedMessage extends Message {
-  status: MessageStatus;
-  channel_id?: number;
-}
+import { ExtendedMessage, MessageStatus } from '../types/message';
 
 // Типы WebSocket событий
 export interface WebSocketMessageData {

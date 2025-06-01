@@ -98,25 +98,21 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     // Проверяем наличие флагов блокировки пагинации
     // Блокируем только если идет загрузка (isLoadingMoreRef) или если loadingMode это 'initial' или 'around'
     const isPaginationBlocked = isLoadingMoreRef.current || loadingMode === 'initial' || loadingMode === 'around' || !initialLoadCompleteRef.current;
-    // Вычисляем расстояние до низа
-    const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     
-    // Загружаем больше сообщений при скролле вверх (когда остается 20% от верха)
-    // Но только если контейнер имеет достаточную высоту (больше 200px)
-    if (container.scrollTop < container.scrollHeight * 0.2 && 
-        container.scrollHeight > 200 && 
-        !isPaginationBlocked && 
-        hasMoreMessages && 
-        messages.length > 0) {
-      // Only load more if we have messages
-      if (messages.length >= messagesPerPage) {
+    if (!isPaginationBlocked) {
+      // Trigger pagination when scrolled to 20% from top - load older messages
+      const scrollPercentageFromTop = container.scrollTop / container.scrollHeight;
+      if (scrollPercentageFromTop < 0.2 && hasMoreMessages) {
+        // Set loading state
         setLoadingWithTimeout(true);
         setLoadingMode('pagination');
         
-        // Get the ID of the oldest message in the current view
+        // Чтобы избежать множественных запросов с одним и тем же beforeId,
+        // проверяем, отличается ли ID от предыдущего запроса
         // Сортируем сообщения перед выбором ID
         const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
         const oldestMessage = sortedMsgs[0]; // Первое сообщение в отсортированном массиве
+        
         if (oldestMessage && lastBeforeIdRef.current !== oldestMessage.id) {
           setBeforeId(oldestMessage.id);
           lastBeforeIdRef.current = oldestMessage.id;
@@ -125,42 +121,46 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
           lastAfterIdRef.current = null;
           // Сбрасываем skipMainQuery чтобы запрос мог отправиться
           setSkipMainQuery(false);
-        }
-      } else {
-        // If we have less messages than a full page, we've reached the beginning
-        setHasMoreMessages(false);
-      }
-    }
-    
-    // Вычисляем процент расстояния до низа от общей высоты скролла
-    const scrollPercentFromBottom = (scrollBottom / container.scrollHeight) * 100;
-    
-    // Загружаем больше сообщений когда до низа остается меньше 40% от общей высоты
-    if (scrollPercentFromBottom < 40 && !isPaginationBlocked && !afterPaginationCooldownRef.current && hasMoreMessagesAfter && enableAfterPagination && messages.length > 0) {        
-      if (messages.length > 0) {
-        setLoadingWithTimeout(true);
-        setLoadingMode('pagination');
-        
-        // Get the ID of the newest message in the current view
-        // Сортируем сообщения перед выбором ID
-        const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-        const newestMessage = sortedMsgs[sortedMsgs.length - 1]; // Последнее сообщение в отсортированном массиве
-                  
-        if (newestMessage && lastAfterIdRef.current !== newestMessage.id) {
-          setAfterId(newestMessage.id);
-          lastAfterIdRef.current = newestMessage.id;
-          // Очищаем beforeId чтобы избежать конфликтов
-          setBeforeId(null);
-          lastBeforeIdRef.current = null;
-          // Сбрасываем skipMainQuery чтобы запрос мог отправиться
-          setSkipMainQuery(false);
-          
-          // Устанавливаем кулдаун для предотвращения повторной пагинации
-          afterPaginationCooldownRef.current = true;
-        } else if (newestMessage) {
+        } else if (oldestMessage) {
           // Если это дубликат запроса, сбрасываем состояние загрузки
           setLoadingWithTimeout(false);
           setLoadingMode(null);
+        }
+      }
+      
+      // Pagination for loading newer messages when scrolled close to bottom
+      if (enableAfterPagination && 
+          !afterPaginationCooldownRef.current && 
+          hasMoreMessagesAfter && 
+          messages.length >= messagesPerPage) {
+        
+        const scrolledToBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        
+        if (scrolledToBottom) {
+          setLoadingWithTimeout(true);
+          setLoadingMode('pagination');
+          
+          // Get the ID of the newest message in the current view
+          // Сортируем сообщения перед выбором ID
+          const sortedMsgs = [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+          const newestMessage = sortedMsgs[sortedMsgs.length - 1]; // Последнее сообщение в отсортированном массиве
+                    
+          if (newestMessage && lastAfterIdRef.current !== newestMessage.id) {
+            setAfterId(newestMessage.id);
+            lastAfterIdRef.current = newestMessage.id;
+            // Очищаем beforeId чтобы избежать конфликтов
+            setBeforeId(null);
+            lastBeforeIdRef.current = null;
+            // Сбрасываем skipMainQuery чтобы запрос мог отправиться
+            setSkipMainQuery(false);
+            
+            // Устанавливаем кулдаун для предотвращения повторной пагинации
+            afterPaginationCooldownRef.current = true;
+          } else if (newestMessage) {
+            // Если это дубликат запроса, сбрасываем состояние загрузки
+            setLoadingWithTimeout(false);
+            setLoadingMode(null);
+          }
         }
       }
     }

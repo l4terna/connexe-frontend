@@ -73,19 +73,26 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Использование хука пагинации
   const { state: paginationState, actions: paginationActions, isLoadingMoreRef, lastBeforeIdRef, lastAfterIdRef, setLoadingWithTimeout } = useMessagePagination();
   
+  // Использование хука для управления статусом прочтения сообщений
+  const {
+    unreadMessagesBufferRef,
+    markMessageAsRead,
+    markAllMessagesAsRead,
+    addToReadBuffer
+  } = useMessageReadStatus({
+    activeChannel,
+    user
+  });
+  
+  // Ref for bulk read all functionality
+  const bulkReadAllRef = useRef<number>(0);
+  
   // Refs должны быть объявлены до использования в хуках
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const scrollCorrectionRef = useRef<{
     prepareScrollCorrection: () => void;
-    setDisableSmoothScroll: (value: boolean) => void;
-  }>(null);
-  const bulkReadAllRef = useRef<number>(0);
-  
-  // Использование хука для работы с прочитанными сообщениями
-  const { markMessageAsRead, markAllMessagesAsRead, addToReadBuffer, unreadMessagesBufferRef } = useMessageReadStatus({
-    activeChannel,
-    user
-  });
+    setDisableSmoothScroll: (disable: boolean) => void;
+  } | null>(null);
   
   // Использование хука для работы со скроллом
   const {
@@ -100,15 +107,24 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setDisableAutoScroll,
     scrollToBottom,
     scrollToMessage,
-    handleScrollToBottom
+    prepareScrollCorrection,
+    setDisableSmoothScroll
   } = useMessageScroll({
     messagesContainerRef,
     messages,
     activeChannel,
     user,
     onMarkAllAsRead: markAllMessagesAsRead,
-    bulkReadAllRef
+    bulkReadAllRef,
+    paginationActions,
+    messagesPerPage: 50
   });
+  
+  // Assign scroll correction functions to ref for pagination use
+  scrollCorrectionRef.current = {
+    prepareScrollCorrection,
+    setDisableSmoothScroll
+  };
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -584,23 +600,32 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   
   // Effect to handle target message navigation after around loading
   useEffect(() => {
+    // Добавлена обработка случая, когда messages.length === 0, но данные уже загружены
+    const isAroundComplete = paginationState.loadingMode === 'around' && !isLoadingAround;
     
-    if (targetMessageId && messages.length > 0 && paginationState.loadingMode === 'around' && !isLoadingAround) {
+    if (targetMessageId && isAroundComplete) {
+      // Проверяем даже если массив сообщений пуст
       const targetExists = messages.some(msg => msg.id === targetMessageId);
       
-      if (targetExists) {        
+      if (messages.length === 0 && aroundMessagesData && aroundMessagesData.length > 0) {
+        // Если сообщения не были добавлены, добавляем их сейчас
+        console.log('[MainChatArea] Пустой список сообщений после around загрузки, принудительно добавляем сообщения', aroundMessagesData.length);
+        const newExtendedMessages = aroundMessagesData.map(convertToExtendedMessage);
+        setMessages(newExtendedMessages);
+        // После добавления сообщений эффект выполнится снова
+      } else if (targetExists) {        
+        console.log('[MainChatArea] Найдено целевое сообщение, прокручиваем к нему', targetMessageId);
         // Продолжаем блокировать пагинацию во время анимации
         setLoadingWithTimeout(true);
         
-        // Форсируем обновление виртуализации
-        requestAnimationFrame(() => {
-          // Устанавливаем ref для MessageList
-          scrollToMessageIdRef.current = targetMessageId;
+        // Форсируем обновление виртуализации - выполняем сразу, без requestAnimationFrame
+        // Устанавливаем ref для MessageList
+        scrollToMessageIdRef.current = targetMessageId;
+        // Также устанавливаем forceScrollToMessageId для мгновенной прокрутки
+        setForceScrollToMessageId(targetMessageId);
           
-          // Триггерим обновление через изменение состояния
-          setMessages(prev => [...prev]); // Форсируем пересчет виртуализации
-          
-        });
+        // Триггерим обновление через изменение состояния
+        setMessages(prev => [...prev]); // Форсируем пересчет виртуализации
         
         // Highlight the target message
         setHighlightedMessages(prev => {
@@ -652,7 +677,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         }, 200);
       } 
     }
-  }, [messages.length, targetMessageId, paginationState.loadingMode, isLoadingAround, paginationActions, setHighlightedMessages, setFocusedMessageId, setMessages]);
+  }, [messages.length, messages, targetMessageId, paginationState.loadingMode, isLoadingAround, paginationActions, setHighlightedMessages, setFocusedMessageId, setMessages, aroundMessagesData, convertToExtendedMessage, setForceScrollToMessageId, setDisableAutoScroll, setLoadingWithTimeout]);
 
   // Remove old auto-scroll effect - now handled in main message loading effect
 
@@ -776,7 +801,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         ...result,
         status: MessageStatus.SENT,
         channel_id: activeChannel.id, // Добавляем для проверки канала
-        reply: result.reply // Use the reply from the server response
+        reply: result.reply ? convertToExtendedMessage(result.reply) : null // Convert reply to ExtendedMessage
       };
       
       setMessages(prev => [...prev, newMessage]);

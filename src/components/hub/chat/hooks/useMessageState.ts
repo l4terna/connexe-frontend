@@ -12,7 +12,11 @@ export const useMessageState = () => {
   const convertToExtendedMessage = useCallback((message: Message): ExtendedMessage => {
     return {
       ...message,
-      status: 'status' in message ? (message as any).status : MessageStatus.SENT
+      status: 'status' in message ? (message as any).status : MessageStatus.SENT,
+      reply: message.reply ? {
+        ...message.reply,
+        status: 'status' in message.reply ? (message.reply as any).status : MessageStatus.SENT
+      } : null
     };
   }, []);
 

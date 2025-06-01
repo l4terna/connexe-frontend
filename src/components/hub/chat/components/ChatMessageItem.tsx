@@ -158,14 +158,20 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
           if (onMouseLeave) onMouseLeave(e);
         }}
         sx={{
+          contentVisibility: 'auto',
+          containIntrinsicSize: '0 80px',
+          contain: 'layout style paint',
           display: 'flex',
           gap: 2,
           alignItems: 'flex-start',
           position: 'relative',
           borderRadius: '10px',
+          willChange: 'auto',   
           transition: 'background-color 0.3s ease, box-shadow 0.5s ease',
           opacity: isTempMessage ? 0.6 : 1,
-          mt: isFirstInGroup ? 2 : 0,
+          mt: isFirstInGroup ? 3 : 0.5,
+          px: 1.5,
+          py: 0.5,
           backgroundColor: isFocused
             ? 'rgba(0, 207, 255, 0.25)' // Bright blue highlight for focused message (reply source)
             : isHighlighted
@@ -305,37 +311,51 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
               {message.reply && (
                 <Box
                   sx={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    borderRadius: '4px',
-                    p: 1,
-                    background: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    mb: 1,
+                    mb: 0.8,
                     mt: 0.25,
-                    cursor: 'pointer',
-                    '&:hover': {
-                      background: 'rgba(255,255,255,0.06)',
-                    }
                   }}
-                  onClick={handleReplyClick}
                 >
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <ReplyIcon sx={{ fontSize: '0.9rem', color: '#00CFFF' }} />
-                    <Typography sx={{ color: '#00CFFF', fontSize: '0.82rem', fontWeight: '500' }}>
-                      {message.reply.author.login}
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      borderRadius: '8px',
+                      padding: '6px 10px',
+                      ml: 0,
+                      background: 'rgba(0, 207, 255, 0.06)',
+                      borderLeft: '3px solid #00CFFF',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        background: 'rgba(0, 207, 255, 0.1)',
+                        transform: 'translateX(2px)',
+                      }
+                    }}
+                    onClick={handleReplyClick}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography sx={{ 
+                        color: '#00CFFF', 
+                        fontSize: '0.75rem', 
+                        fontWeight: '600',
+                        letterSpacing: 0.3
+                      }}>
+                        {message.reply.author.login}
+                      </Typography>
+                    </Box>
+                    <Typography sx={{ 
+                      color: 'rgba(255,255,255,0.6)', 
+                      fontSize: '0.8rem', 
+                      mt: 0.2, 
+                      lineHeight: 1.3,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '400px'
+                    }}>
+                      {formatReplyContent(message.reply)}
                     </Typography>
                   </Box>
-                  <Typography sx={{ 
-                    color: 'rgba(255,255,255,0.7)', 
-                    fontSize: '0.82rem', 
-                    mt: 0.3, 
-                    lineHeight: 1.3 
-                  }} 
-                  noWrap
-                  >
-                    {formatReplyContent(message.reply)}
-                  </Typography>
                 </Box>
               )}
             </Box>

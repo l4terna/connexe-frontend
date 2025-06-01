@@ -1,86 +1,107 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+// SearchBar.tsx - изолированная версия
+import React, { useCallback, useMemo } from 'react';
 import { Box, IconButton, Typography, Tooltip } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { Formik, Form, Field } from 'formik';
-import DOMPurify from 'dompurify';
-import { Message } from '../../../../api/channels';
+import { SearchResultItem } from './SearchResultItem';
+import { useSearchBar } from '../hooks/useSearchBar';
+import type { Message } from '@/api/channels';
 
 interface SearchBarProps {
-  searchMode: boolean;
-  setSearchMode: (mode: boolean) => void;
-  searchQuery: string;
-  searchInputRef: React.RefObject<HTMLInputElement | null>;
-  searchResultsRef: React.RefObject<HTMLDivElement | null>;
-  showSearchResults: boolean;
-  setShowSearchResults: (show: boolean) => void;
-  searchResults: Message[] | undefined;
-  isSearching: boolean;
-  debouncedSearchQuery: string;
-  handleSearchInputChange: (value: string) => void;
-  clearSearch: () => void;
+  activeChannelId: number | null;
   onSearchResultClick: (message: Message) => void;
-  onLoadMore?: () => void;
+  // Optional search-related props from parent
+  searchMode?: boolean;
+  setSearchMode?: (mode: boolean) => void;
+  searchQuery?: string;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  searchResultsRef?: React.RefObject<HTMLDivElement | null>;
+  showSearchResults?: boolean;
+  setShowSearchResults?: (show: boolean) => void;
+  searchResults?: Message[];
+  isSearching?: boolean;
+  debouncedSearchQuery?: string;
+  handleSearchInputChange?: (value: string) => void;
+  clearSearch?: () => void;
+  loadMore?: () => void;
   hasMore?: boolean;
   isLoadingMore?: boolean;
 }
 
 const SearchBar: React.FC<SearchBarProps> = ({
-  searchMode,
-  setSearchMode,
-  searchQuery,
-  searchInputRef,
-  searchResultsRef,
-  showSearchResults,
-  setShowSearchResults,
-  searchResults,
-  isSearching,
-  debouncedSearchQuery,
-  handleSearchInputChange,
-  clearSearch,
+  activeChannelId,
   onSearchResultClick,
-  onLoadMore,
-  hasMore = false,
-  isLoadingMore = false
+  // Optional props from parent
+  searchMode: passedSearchMode,
+  setSearchMode: passedSetSearchMode,
+  searchQuery: passedSearchQuery,
+  searchInputRef: passedSearchInputRef,
+  searchResultsRef: passedSearchResultsRef,
+  showSearchResults: passedShowSearchResults,
+  setShowSearchResults: passedSetShowSearchResults,
+  searchResults: passedSearchResults,
+  isSearching: passedIsSearching,
+  debouncedSearchQuery: passedDebouncedSearchQuery,
+  handleSearchInputChange: passedHandleSearchInputChange,
+  clearSearch: passedClearSearch,
+  loadMore: passedLoadMore,
+  hasMore: passedHasMore,
+  isLoadingMore: passedIsLoadingMore
 }) => {
-  const [displayedResults, setDisplayedResults] = useState<Message[]>([]);
-  const loadingRef = useRef(false);
+  // Используем хук для изоляции логики поиска только если не переданы пропсы
+  const hookValues = useSearchBar({ activeChannelId });
   
-  const formatMessageTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-  };
-
-  // Update displayed results when search results change
-  useEffect(() => {
-    if (searchResults) {
-      setDisplayedResults(searchResults);
-    }
-  }, [searchResults]);
-
-  // Handle scroll for pagination
+  // Use passed props if they exist, otherwise use hook values
+  const searchMode = passedSearchMode !== undefined ? passedSearchMode : hookValues.searchMode;
+  const setSearchMode = passedSetSearchMode || hookValues.setSearchMode;
+  const searchQuery = passedSearchQuery !== undefined ? passedSearchQuery : hookValues.searchQuery;
+  const searchResults = passedSearchResults || hookValues.searchResults;
+  const debouncedSearchQuery = passedDebouncedSearchQuery !== undefined ? passedDebouncedSearchQuery : hookValues.debouncedSearchQuery;
+  const isSearching = passedIsSearching !== undefined ? passedIsSearching : hookValues.isSearching;
+  const showSearchResults = passedShowSearchResults !== undefined ? passedShowSearchResults : hookValues.showSearchResults;
+  const setShowSearchResults = passedSetShowSearchResults || hookValues.setShowSearchResults;
+  const hasMore = passedHasMore !== undefined ? passedHasMore : hookValues.hasMore;
+  const isLoadingMore = passedIsLoadingMore !== undefined ? passedIsLoadingMore : hookValues.isLoadingMore;
+  const searchInputRef = passedSearchInputRef || hookValues.searchInputRef;
+  const searchResultsRef = passedSearchResultsRef || hookValues.searchResultsRef;
+  const handleSearchInputChange = passedHandleSearchInputChange || hookValues.handleSearchInputChange;
+  const clearSearch = passedClearSearch || hookValues.clearSearch;
+  const loadMore = passedLoadMore || hookValues.loadMore;
+  const hookHandleResultClick = hookValues.handleResultClick;
+  // Мемоизируем обработчик скролла
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const container = e.currentTarget;
-    const scrollHeight = container.scrollHeight;
-    const scrollTop = container.scrollTop;
-    const clientHeight = container.clientHeight;
+    const { scrollHeight, scrollTop, clientHeight } = container;
     
-    // Check if scrolled to bottom for pagination
+    // Проверяем, достигли ли конца списка
     if (scrollHeight - scrollTop - clientHeight < 100) {
-      if (onLoadMore && hasMore && !isLoadingMore && !loadingRef.current) {
-        loadingRef.current = true;
-        onLoadMore();
-        setTimeout(() => {
-          loadingRef.current = false;
-        }, 1000);
+      if (loadMore && hasMore && !isLoadingMore) {
+        loadMore();
       }
     }
-  }, [onLoadMore, hasMore, isLoadingMore]);
+  }, [loadMore, hasMore, isLoadingMore]);
+
+  // Мемоизируем обработчик клика на результат
+  const handleResultClick = useCallback((message: Message) => {
+    // Важно: не закрываем поиск здесь, это будет сделано в обработчике
+    // Сначала проверяем наличие внешнего обработчика
+    if (onSearchResultClick) {
+      onSearchResultClick(message);
+    } else if (hookHandleResultClick) {
+      // Иначе используем внутренний обработчик из хука
+      hookHandleResultClick(message);
+    }
+    // Не закрываем поиск здесь, чтобы не прерывать навигацию
+  }, [onSearchResultClick, hookHandleResultClick]);
+
+  // Мемоизируем количество результатов
+  const resultsCount = searchResults?.length || 0;
+  const resultsText = useMemo(() => 
+    `${resultsCount} ${resultsCount === 1 ? 'result' : 'results'}`,
+    [resultsCount]
+  );
 
   if (!searchMode) {
     return (
@@ -88,11 +109,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
         <IconButton 
           onClick={() => {
             setSearchMode(true);
-            setTimeout(() => {
-              if (searchInputRef.current) {
-                searchInputRef.current.focus();
-              }
-            }, 100);
+            // Используем RAF для оптимизации
+            requestAnimationFrame(() => {
+              searchInputRef.current?.focus();
+            });
           }}
           sx={{
             color: 'rgba(255,255,255,0.6)',
@@ -108,6 +128,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
     );
   }
 
+  const hasResults = searchResults && searchResults.length > 0;
+  const shouldShowResults = showSearchResults && searchQuery.trim();
+
   return (
     <Box sx={{ 
       display: 'flex', 
@@ -119,9 +142,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
         display: 'flex', 
         alignItems: 'center', 
         background: 'rgba(255,255,255,0.05)',
-        borderRadius: showSearchResults && searchQuery.trim() && searchResults && searchResults.length > 0 ? '20px 20px 0 0' : '20px',
+        borderRadius: shouldShowResults && hasResults ? '20px 20px 0 0' : '20px',
         border: '1px solid rgba(255,255,255,0.1)',
-        borderBottom: showSearchResults && searchQuery.trim() && searchResults && searchResults.length > 0 ? 'none' : '1px solid rgba(255,255,255,0.1)',
+        borderBottom: shouldShowResults && hasResults ? 'none' : '1px solid rgba(255,255,255,0.1)',
         paddingLeft: 2,
         paddingRight: 1,
         width: '300px',
@@ -136,7 +159,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
             <Form style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', position: 'relative' }}>
                 <Field name="query">
-                  {({ field, form }: any) => (
+                  {({ field }: any) => (
                     <input
                       {...field}
                       ref={searchInputRef}
@@ -145,24 +168,8 @@ const SearchBar: React.FC<SearchBarProps> = ({
                         handleSearchInputChange(e.target.value);
                       }}
                       onFocus={() => {
-                        if (field.value?.trim() && searchResults && searchResults.length > 0) {
+                        if (field.value?.trim() && hasResults) {
                           setShowSearchResults(true);
-                        }
-                      }}
-                      onBlur={(e) => {
-                        // Check if we're moving to the search results
-                        const relatedTarget = e.relatedTarget as HTMLElement;
-                        if (relatedTarget && searchResultsRef.current && !searchResultsRef.current.contains(relatedTarget)) {
-                          // Delay hiding to allow for clicks on results
-                          setTimeout(() => {
-                            if (searchResultsRef.current && !searchResultsRef.current.matches(':hover')) {
-                              setShowSearchResults(false);
-                            }
-                          }, 150);
-                        } else if (!relatedTarget) {
-                          setTimeout(() => {
-                            setShowSearchResults(false);
-                          }, 150);
                         }
                       }}
                       placeholder="Поиск сообщений..."
@@ -181,7 +188,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
                             setShowSearchResults(false);
                           } else {
                             clearSearch();
-                            form.resetForm();
                           }
                         }
                       }}
@@ -195,7 +201,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                       position: 'absolute',
                       right: 0,
                       top: '-18px',
-                      color: searchResults && searchResults.length > 0 ? '#00FFBA' : '#FF69B4',
+                      color: hasResults ? '#00FFBA' : '#FF69B4',
                       fontSize: '0.7rem',
                       fontWeight: 500,
                       padding: '2px 6px',
@@ -203,7 +209,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                       background: 'rgba(0,0,0,0.3)'
                     }}
                   >
-                    {searchResults?.length || 0} {searchResults?.length === 1 ? 'result' : 'results'}
+                    {resultsText}
                   </Typography>
                 )}
               </Box>
@@ -234,26 +240,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
       </Box>
       
       {/* Search Results Dropdown */}
-      {showSearchResults && searchQuery.trim() && (
+      {shouldShowResults && (
         <Box
           ref={searchResultsRef}
-          onMouseDown={(e) => {
-            // Prevent input blur when clicking on results
-            e.preventDefault();
-          }}
-          onMouseEnter={() => {
-            // Keep results visible when hovering
-            setShowSearchResults(true);
-          }}
-          onMouseLeave={(e) => {
-            // Only hide if not moving to input
-            const relatedTarget = e.relatedTarget as HTMLElement;
-            if (relatedTarget && searchInputRef.current && !searchInputRef.current.contains(relatedTarget)) {
-              setTimeout(() => setShowSearchResults(false), 100);
-            } else if (!relatedTarget) {
-              setTimeout(() => setShowSearchResults(false), 100);
-            }
-          }}
+          onMouseDown={(e) => e.preventDefault()}
           onScroll={handleScroll}
           sx={{
             position: 'absolute',
@@ -270,6 +260,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
             zIndex: 10002,
             backdropFilter: 'blur(15px)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            // Оптимизация скролла
+            willChange: 'scroll-position',
+            contain: 'layout style paint',
             '&::-webkit-scrollbar': {
               width: '6px',
             },
@@ -318,93 +311,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
             </Box>
           )}
           
-          {/* Search results */}
-          {!isSearching && displayedResults && displayedResults.length > 0 && displayedResults.map((msg, index) => (
-            <Box
+          {/* Search results with memoized items */}
+          {!isSearching && hasResults && searchResults.map((msg, index) => (
+            <SearchResultItem
               key={`${msg.id}-${index}`}
-              onClick={() => {
-                onSearchResultClick(msg);
-                setShowSearchResults(false);
-              }}
-              onMouseDown={(e) => {
-                e.preventDefault();
-              }}
-              sx={{
-                p: 2,
-                borderBottom: '1px solid rgba(255,255,255,0.05)',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                '&:hover': {
-                  background: 'rgba(255,255,255,0.1)',
-                  transform: 'translateX(2px)',
-                },
-                '&:last-child': {
-                  borderBottom: 'none',
-                }
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Typography sx={{ 
-                  color: '#00CFFF', 
-                  fontSize: '0.8rem', 
-                  fontWeight: 600,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  maxWidth: '150px'
-                }}>
-                  {msg.author.login}
-                </Typography>
-                <Typography sx={{ 
-                  color: 'rgba(255,255,255,0.4)', 
-                  fontSize: '0.7rem',
-                  ml: 'auto'
-                }}>
-                  {formatMessageTime(msg.created_at)}
-                </Typography>
-              </Box>
-              <Typography
-                sx={{ 
-                  color: 'rgba(255,255,255,0.8)', 
-                  fontSize: '0.85rem',
-                  lineHeight: 1.4,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  '& mark': {
-                    background: 'rgba(255, 105, 180, 0.3)',
-                    color: '#FF69B4',
-                    padding: '1px 2px',
-                    borderRadius: '2px',
-                    fontWeight: 600
-                  }
-                }}
-                dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(
-                    (() => {
-                      let content = msg.content;
-                      
-                      if (content.length > 150) {
-                        content = content.substring(0, 150) + '...';
-                      }
-                      
-                      content = content.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
-                      
-                      if (debouncedSearchQuery.trim()) {
-                        const query = debouncedSearchQuery.trim();
-                        const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const regex = new RegExp(`(${escapedQuery})`, 'gi');
-                        content = content.replace(regex, '<mark>$1</mark>');
-                      }
-                      
-                      return content;
-                    })()
-                  )
-                }}
-              />
-            </Box>
+              message={msg}
+              searchQuery={debouncedSearchQuery}
+              onResultClick={handleResultClick}
+            />
           ))}
           
           {/* Loading more indicator */}

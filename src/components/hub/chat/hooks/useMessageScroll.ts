@@ -8,6 +8,14 @@ interface UseMessageScrollProps {
   onScrollToBottom?: () => void;
   onMarkAllAsRead?: () => void;
   bulkReadAllRef?: React.RefObject<number>;
+  paginationActions?: {
+    handleScrollPagination: (
+      container: HTMLElement,
+      messages: any[],
+      messagesPerPage: number
+    ) => void;
+  };
+  messagesPerPage?: number;
 }
 
 interface UseMessageScrollReturn {
@@ -24,6 +32,8 @@ interface UseMessageScrollReturn {
   scrollToBottom: (instant?: boolean) => void;
   scrollToMessage: (messageId: number) => void;
   handleScrollToBottom: () => void;
+  prepareScrollCorrection: () => void;
+  setDisableSmoothScroll: (value: boolean) => void;
 }
 
 export const useMessageScroll = ({
@@ -32,19 +42,32 @@ export const useMessageScroll = ({
   activeChannel,
   onScrollToBottom,
   onMarkAllAsRead,
-  bulkReadAllRef
+  bulkReadAllRef,
+  paginationActions,
+  messagesPerPage = 20
 }: UseMessageScrollProps): UseMessageScrollReturn => {
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showDateLabel, setShowDateLabel] = useState(false);
   const [currentDateLabel, setCurrentDateLabel] = useState<string | null>(null);
   const [disableAutoScroll, setDisableAutoScroll] = useState(false);
+  const [disableSmoothScroll, setDisableSmoothScroll] = useState(false);
   
   const dateLabelTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const previousScrollHeightRef = useRef<number>(0);
   const previousScrollTopRef = useRef<number>(0);
   const messagesCountRef = useRef<number>(0);
+  const scrollThrottleRef = useRef<boolean>(false);
+
+  // Function to prepare for scroll correction
+  const prepareScrollCorrection = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      previousScrollHeightRef.current = container.scrollHeight;
+      previousScrollTopRef.current = container.scrollTop;
+    }
+  }, [messagesContainerRef]);
 
   // Function to scroll to bottom
   const scrollToBottom = useCallback((instant: boolean = false) => {
@@ -60,7 +83,7 @@ export const useMessageScroll = ({
     
     // Use requestAnimationFrame to ensure DOM is updated
     requestAnimationFrame(() => {
-      if (instant) {
+      if (instant || disableSmoothScroll) {
         // Temporarily disable smooth scrolling for instant positioning
         const originalScrollBehavior = container.style.scrollBehavior;
         container.style.scrollBehavior = 'auto';
@@ -79,7 +102,7 @@ export const useMessageScroll = ({
         }
       }, 100);
     });
-  }, [disableAutoScroll, messagesContainerRef]);
+  }, [disableAutoScroll, disableSmoothScroll, messagesContainerRef]);
 
   // Function to scroll to a specific message and highlight it
   const scrollToMessage = useCallback((messageId: number) => {
@@ -115,24 +138,27 @@ export const useMessageScroll = ({
     }
     
     highlightTimeoutRef.current = setTimeout(() => {
-      messageElement.style.backgroundColor = '';
-      highlightTimeoutRef.current = null;
-    }, 1500);
-  }, [messagesContainerRef]);
+      if (messageElement) {
+        messageElement.style.backgroundColor = '';
+      }
+      setDisableAutoScroll(false);
+      
+      // Re-check if we should scroll to bottom after highlighting
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 20) {
+        scrollToBottom();
+      }
+    }, 2000);
+  }, [messagesContainerRef, scrollToBottom]);
 
-  // Function to scroll to bottom and mark all messages as read
+  // Function to handle scroll to bottom with mark as read
   const handleScrollToBottom = useCallback(() => {
-    // Re-enable auto-scroll as user explicitly requested to scroll down
-    setDisableAutoScroll(false);
+    scrollToBottom();
     
-    // Mark all messages as read
-    if (onMarkAllAsRead) {
+    // Mark all as read when scrolling to bottom
+    if (onMarkAllAsRead && activeChannel) {
       onMarkAllAsRead();
     }
-    
-    // Scroll to bottom
-    scrollToBottom();
-  }, [scrollToBottom, onMarkAllAsRead]);
+  }, [activeChannel, onMarkAllAsRead, scrollToBottom]);
 
   // Helper function to format date for group
   const formatDateForGroup = (timestamp: string) => {
@@ -166,98 +192,108 @@ export const useMessageScroll = ({
     // Track intentional scroll up
     let lastScrollTop = container.scrollTop;
     let intentionalScrollUp = false;
-    let scrollMovementStartTime = 0;
     let scrollTimeoutId: NodeJS.Timeout | null = null;
+    let lastMarkAllAsReadTime = 0;
 
     const handleScroll = () => {
-      // Clear previous timeout if exists
-      if (scrollTimeoutId) {
-        clearTimeout(scrollTimeoutId);
-      }
+      // Throttle scroll updates
+      if (scrollThrottleRef.current) return;
+      scrollThrottleRef.current = true;
 
-      const currentScrollTop = container.scrollTop;
-      const scrollPosition = container.scrollHeight - currentScrollTop - container.clientHeight;
-      const isAtBottom = scrollPosition < 100;
-      
-      // Determine scroll direction
-      if (currentScrollTop < lastScrollTop) {
-        // Scrolling up
-        if (!intentionalScrollUp) {
-          intentionalScrollUp = true;
-          scrollMovementStartTime = Date.now();
+      requestAnimationFrame(() => {
+        // Clear previous timeout if exists
+        if (scrollTimeoutId) {
+          clearTimeout(scrollTimeoutId);
         }
-      } else if (currentScrollTop > lastScrollTop) {
-        // Scrolling down
-        if (isAtBottom) {
-          intentionalScrollUp = false;
-        }
-      }
-      
-      // Update last scroll position
-      lastScrollTop = currentScrollTop;
-      
-      // Set state only if user is not scrolling up or enough time has passed
-      const scrollTimeElapsed = Date.now() - scrollMovementStartTime;
-      if (!intentionalScrollUp || scrollTimeElapsed > 1000) {
-        setIsScrolledToBottom(isAtBottom);
-      }
-      
-      // If scrolled to bottom, mark all messages as read and re-enable auto-scroll
-      if (isAtBottom && activeChannel) {
-        // Re-enable auto-scroll when user manually scrolls to bottom
-        setDisableAutoScroll(false);
+
+        const currentScrollTop = container.scrollTop;
+        const scrollPosition = container.scrollHeight - currentScrollTop - container.clientHeight;
+        const isAtBottom = scrollPosition < 100;
         
-        // Mark all messages as read with debouncing (only once per 1000ms)
-        const now = Date.now();
-        if (onMarkAllAsRead && bulkReadAllRef?.current && now - lastMarkAllAsReadTime > 1000 && now - bulkReadAllRef.current > 1000) {
-          lastMarkAllAsReadTime = now;
-          bulkReadAllRef.current = now;
-          onMarkAllAsRead();
-        }
-      }
-      
-      // Show/hide scroll button
-      setShowScrollButton(container.scrollTop + container.clientHeight < container.scrollHeight - 400);
-      
-      // Handle date label visibility
-      if (dateLabelTimeoutRef.current) {
-        clearTimeout(dateLabelTimeoutRef.current);
-      }
-      
-      // Check for visible date labels
-      const visibleElements = container.querySelectorAll('.message-item');
-      if (!visibleElements.length) return;
-      
-      let visibleDate: string | null = null;
-      
-      // Process visible elements to find date
-      visibleElements.forEach(element => {
-        const rect = element.getBoundingClientRect();
-        const containerRect = container.getBoundingClientRect();
-        const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
-        
-        if (isVisible && !visibleDate) {
-          const dateAttr = element.getAttribute('data-date');
-          if (dateAttr) {
-            visibleDate = formatDateForGroup(dateAttr);
+        // Determine scroll direction
+        if (currentScrollTop < lastScrollTop) {
+          // Scrolling up
+          if (!intentionalScrollUp) {
+            intentionalScrollUp = true;
+          }
+          
+          // Check if we should trigger pagination
+          if (paginationActions && messagesPerPage) {
+            paginationActions.handleScrollPagination(container, messages, messagesPerPage);
+          }
+        } else if (currentScrollTop > lastScrollTop) {
+          // Scrolling down
+          if (isAtBottom) {
+            // Reset intentional scroll up when reaching bottom
+            intentionalScrollUp = false;
+            
+            // Mark messages as read when at bottom
+            if (!isScrolledToBottom) {
+              setIsScrolledToBottom(true);
+              
+              // Mark all messages as read with debouncing (only once per 1000ms)
+              const now = Date.now();
+              if (onMarkAllAsRead && bulkReadAllRef?.current && now - lastMarkAllAsReadTime > 1000 && now - bulkReadAllRef.current > 1000) {
+                lastMarkAllAsReadTime = now;
+                bulkReadAllRef.current = now;
+                onMarkAllAsRead();
+              }
+            }
           }
         }
-      });
-
-      if (visibleDate) {
-        setCurrentDateLabel(visibleDate);
-        setShowDateLabel(true);
         
-        // Hide the date label after 1 second
-        dateLabelTimeoutRef.current = setTimeout(() => {
-          setShowDateLabel(false);
-        }, 1000);
-      }
-      
-      // Set a timeout to determine when scrolling has stopped
-      scrollTimeoutId = setTimeout(() => {
-        scrollTimeoutId = null;
-      }, 150);
+        // Update last scroll position
+        lastScrollTop = currentScrollTop;
+        
+        // Update scrolled to bottom state
+        setIsScrolledToBottom(isAtBottom);
+        
+        // Show/hide scroll button
+        setShowScrollButton(container.scrollTop + container.clientHeight < container.scrollHeight - 400);
+        
+        // Handle date label visibility
+        if (dateLabelTimeoutRef.current) {
+          clearTimeout(dateLabelTimeoutRef.current);
+        }
+        
+        // Check for visible date labels
+        const visibleElements = container.querySelectorAll('.message-item');
+        if (!visibleElements.length) return;
+        
+        let visibleDate: string | null = null;
+        
+        // Process visible elements to find date
+        visibleElements.forEach(element => {
+          const rect = element.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+          
+          if (isVisible && !visibleDate) {
+            const dateAttr = element.getAttribute('data-date');
+            if (dateAttr) {
+              visibleDate = formatDateForGroup(dateAttr);
+            }
+          }
+        });
+
+        if (visibleDate) {
+          setCurrentDateLabel(visibleDate);
+          setShowDateLabel(true);
+          
+          // Hide the date label after 1 second
+          dateLabelTimeoutRef.current = setTimeout(() => {
+            setShowDateLabel(false);
+          }, 1000);
+        }
+        
+        // Set a timeout to determine when scrolling has stopped
+        scrollTimeoutId = setTimeout(() => {
+          scrollTimeoutId = null;
+        }, 150);
+
+        // Reset throttle
+        scrollThrottleRef.current = false;
+      });
     };
 
     container.addEventListener('scroll', handleScroll);
@@ -270,7 +306,7 @@ export const useMessageScroll = ({
         clearTimeout(scrollTimeoutId);
       }
     };
-  }, [activeChannel, messages, messagesContainerRef, onMarkAllAsRead, bulkReadAllRef]);
+  }, [activeChannel, messages, messagesContainerRef, onMarkAllAsRead, bulkReadAllRef, paginationActions, messagesPerPage]);
 
   // Effect to handle scroll correction during pagination
   useEffect(() => {
@@ -329,6 +365,8 @@ export const useMessageScroll = ({
     setDisableAutoScroll,
     scrollToBottom,
     scrollToMessage,
-    handleScrollToBottom
+    handleScrollToBottom,
+    prepareScrollCorrection,
+    setDisableSmoothScroll
   };
 };

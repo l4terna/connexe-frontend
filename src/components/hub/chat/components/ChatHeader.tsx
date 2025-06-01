@@ -6,22 +6,7 @@ import { LoadingMode } from '../hooks/useMessagePagination';
 
 interface ChatHeaderProps {
   activeChannel: Channel | null;
-  searchMode: boolean;
-  setSearchMode: (mode: boolean) => void;
-  searchQuery: string;
-  searchInputRef: React.RefObject<HTMLInputElement | null>;
-  searchResultsRef: React.RefObject<HTMLDivElement | null>;
-  showSearchResults: boolean;
-  setShowSearchResults: (show: boolean) => void;
-  searchResults: Message[] | undefined;
-  isSearching: boolean;
-  debouncedSearchQuery: string;
-  handleSearchInputChange: (value: string) => void;
-  clearSearch: () => void;
   onSearchResultClick: (message: Message) => void;
-  onLoadMore?: () => void;
-  hasMore?: boolean;
-  isLoadingMore?: boolean;
   // Loading states
   isLoadingMessages?: boolean;
   isLoadingAround?: boolean;
@@ -31,6 +16,22 @@ interface ChatHeaderProps {
     afterId: number | null;
     isJumpingToMessage: boolean;
   };
+  // Search related props
+  searchMode?: boolean;
+  setSearchMode?: (mode: boolean) => void;
+  searchQuery?: string;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  searchResultsRef?: React.RefObject<HTMLDivElement | null>;
+  showSearchResults?: boolean;
+  setShowSearchResults?: (show: boolean) => void;
+  searchResults?: Message[];
+  isSearching?: boolean;
+  debouncedSearchQuery?: string;
+  handleSearchInputChange?: (value: string) => void;
+  clearSearch?: () => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
 }
 
 /**
@@ -38,6 +39,11 @@ interface ChatHeaderProps {
  */
 const ChatHeader: React.FC<ChatHeaderProps> = ({
   activeChannel,
+  onSearchResultClick,
+  isLoadingMessages = false,
+  isLoadingAround = false,
+  paginationState,
+  // Search related props
   searchMode,
   setSearchMode,
   searchQuery,
@@ -50,34 +56,15 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   debouncedSearchQuery,
   handleSearchInputChange,
   clearSearch,
-  onSearchResultClick,
   onLoadMore,
   hasMore,
   isLoadingMore,
-  isLoadingMessages = false,
-  isLoadingAround = false,
-  paginationState,
 }) => {
   // Determine if we should show loading indicator
   const isLoading = isLoadingMessages || isLoadingAround || 
     (paginationState?.loadingMode === 'pagination' && 
      (paginationState.beforeId !== null || paginationState.afterId !== null)) ||
     (paginationState?.loadingMode === 'around' && paginationState.isJumpingToMessage);
-
-  // Determine loading message
-  const getLoadingMessage = () => {
-    if (isLoadingAround || (paginationState?.loadingMode === 'around' && paginationState.isJumpingToMessage)) {
-      return 'Переход к сообщению...';
-    }
-    if (paginationState?.loadingMode === 'pagination') {
-      if (paginationState.beforeId) return 'Загрузка предыдущих сообщений...';
-      if (paginationState.afterId) return 'Загрузка следующих сообщений...';
-    }
-    if (isLoadingMessages) {
-      return 'Загрузка сообщений...';
-    }
-    return 'Загрузка...';
-  };
 
   return (
     <Box sx={{ 
@@ -94,6 +81,8 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       </Typography>
       
       <SearchBar
+        activeChannelId={activeChannel?.id || null}
+        onSearchResultClick={onSearchResultClick}
         searchMode={searchMode}
         setSearchMode={setSearchMode}
         searchQuery={searchQuery}
@@ -106,8 +95,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         debouncedSearchQuery={debouncedSearchQuery}
         handleSearchInputChange={handleSearchInputChange}
         clearSearch={clearSearch}
-        onSearchResultClick={onSearchResultClick}
-        onLoadMore={onLoadMore}
+        loadMore={onLoadMore}
         hasMore={hasMore}
         isLoadingMore={isLoadingMore}
       />

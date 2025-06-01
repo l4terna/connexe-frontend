@@ -53,8 +53,8 @@ interface MessageListProps {
   activeChannel: Channel | null;
   messages: ExtendedMessage[];
   tempMessages: Map<string, ExtendedMessage>;
-  searchMode: boolean;
-  searchQuery: string;
+  searchMode?: boolean;
+  searchQuery?: string;
   highlightedMessages: Set<number>;
   focusedMessageId: number | null;
   unreadMessages: Set<number>;
@@ -143,8 +143,11 @@ const MessageList: React.FC<MessageListProps> = ({
   messagesEndRef,
   editInputRef,
   highlightTimeoutRef,
+  scrollToMessageIdRef,
   hoverTimeoutRef,
   isHoveringPortal,
+  scrollCorrectionRef,
+  forceScrollToMessageId,
   setHighlightedMessages,
   setFocusedMessageId,
   setEditingMessageId,
@@ -278,7 +281,7 @@ const MessageList: React.FC<MessageListProps> = ({
             </Box>
           ))}
         </Box>
-      ) : searchMode && searchQuery.trim() ? (
+      ) : searchMode && searchQuery && searchQuery.trim() ? (
         <>
           <Typography variant="h6">
             Нет результатов поиска
@@ -315,8 +318,9 @@ const MessageList: React.FC<MessageListProps> = ({
       requestAnimationFrame(() => {
         const scrollTop = container.scrollTop;
 
-        // Check if scrolled near the top for pagination
-        if (scrollTop < 100 && 
+        // Check if scrolled to 20% from top for pagination
+        const scrollPercentageFromTop = scrollTop / container.scrollHeight;
+        if (scrollPercentageFromTop < 0.2 && 
             paginationState.hasMoreMessages && 
             !paginationState.isJumpingToMessage &&
             paginationState.loadingMode !== 'pagination' &&
@@ -337,6 +341,66 @@ const MessageList: React.FC<MessageListProps> = ({
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
   }, [sortedMessages, paginationState, paginationActions]);
+  
+  // Эффект для прокрутки к сообщению по scrollToMessageIdRef или forceScrollToMessageId
+  React.useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    // Проверяем, есть ли ID сообщения для прокрутки
+    const messageIdToScroll = 
+      (forceScrollToMessageId !== null && forceScrollToMessageId !== undefined) ? 
+        forceScrollToMessageId : 
+        (scrollToMessageIdRef?.current || null);
+        
+    if (messageIdToScroll === null) return;
+    
+    // Ищем элемент сообщения по ID
+    const messageElement = container.querySelector(`[data-msg-id="${messageIdToScroll}"]`);
+    
+    if (messageElement) {
+      // Прокручиваем к сообщению с небольшим отступом
+      messageElement.scrollIntoView({ 
+        behavior: scrollCorrectionRef?.current?.setDisableSmoothScroll ? 'auto' : 'smooth',
+        block: 'center'
+      });
+      
+      // Сбрасываем значение в ref после прокрутки
+      if (scrollToMessageIdRef) {
+        scrollToMessageIdRef.current = null;
+      }
+      
+      // Добавляем подсветку сообщения, если оно еще не подсвечено
+      if (focusedMessageId !== messageIdToScroll) {
+        setHighlightedMessages(prev => {
+          const newSet = new Set(prev);
+          newSet.add(messageIdToScroll);
+          return newSet;
+        });
+        
+        if (setFocusedMessageId) {
+          setFocusedMessageId(messageIdToScroll);
+        }
+        
+        // Убираем подсветку через некоторое время
+        if (highlightTimeoutRef.current) {
+          clearTimeout(highlightTimeoutRef.current);
+        }
+        
+        highlightTimeoutRef.current = setTimeout(() => {
+          setHighlightedMessages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(messageIdToScroll);
+            return newSet;
+          });
+          
+          if (setFocusedMessageId) {
+            setFocusedMessageId(null);
+          }
+        }, 1500);
+      }
+    }
+  }, [messages, forceScrollToMessageId, scrollToMessageIdRef?.current, focusedMessageId, highlightTimeoutRef, setHighlightedMessages, setFocusedMessageId, scrollCorrectionRef]);
 
   return (
     <Box 
@@ -447,33 +511,24 @@ const MessageList: React.FC<MessageListProps> = ({
                       sx={{
                         backgroundColor: 'rgba(30,30,47,0.85)',
                         backdropFilter: 'blur(8px)',
-                        borderRadius: '16px',
                         px: 2,
                         py: 0.75,
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        zIndex: 2,
+                        borderRadius: '12px',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+                        zIndex: 1
                       }}
                     >
                       <Typography
+                        variant="body2"
                         sx={{
-                          color: 'rgba(255,255,255,0.9)',
-                          fontWeight: 600,
-                          fontSize: '0.9rem',
+                          color: 'text.secondary',
+                          fontWeight: 500,
+                          fontSize: '0.85rem'
                         }}
                       >
                         {formatDateForGroup(msg.created_at)}
                       </Typography>
                     </Box>
-                    <Box
-                      sx={{
-                        position: 'absolute',
-                        height: '1px',
-                        width: '100%',
-                        backgroundColor: 'rgba(255,255,255,0.08)',
-                        zIndex: 1,
-                      }}
-                    />
                   </Box>
                 );
 
@@ -481,11 +536,9 @@ const MessageList: React.FC<MessageListProps> = ({
                 processedDates.add(messageDateString);
               }
 
-              const isFirstOfGroup = prevAuthorId !== msg.author.id || 
-                (prevMessageTime !== null && !isWithinTimeThreshold(prevMessageTime, msg.created_at));
-
-              const isTempMessage = msg.id === -1;
-
+              const isTempMessage = 'temp_id' in msg;
+              const isFirstOfGroup = msg.author?.id !== prevAuthorId;
+              
               const messageElement = editingMessageId === msg.id ? (
                 <Box
                   key={isTempMessage ? `temp-${msg.created_at}` : msg.id}

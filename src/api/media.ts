@@ -1,14 +1,31 @@
-import { api, baseQuery } from './api';
-import { BaseQueryFn, FetchBaseQueryError, FetchBaseQueryMeta, QueryReturnValue, BaseQueryApi } from '@reduxjs/toolkit/query';
+import { api } from './api';
+import { FetchBaseQueryError, FetchBaseQueryMeta, QueryReturnValue, BaseQueryApi } from '@reduxjs/toolkit/query';
+
+interface SignedUrlResponse {
+  sign: string;
+  expires_at: string;
+}
+
+interface GetSignedUrlsResponse {
+  [key: string]: SignedUrlResponse;
+}
 
 export const mediaApi = api.injectEndpoints({
-  endpoints: (builder) => ({
+  endpoints: (builder) => ({    
+    getSignedUrls: builder.mutation<GetSignedUrlsResponse, { storage_keys: string[] }>({      
+      query: (body) => {
+        console.log('📡 mediaApi.getSignedUrls mutation called with:', body);
+        return {
+          url: '/api/v1/media-sign',
+          method: 'POST',
+          body
+        };
+      }
+    }),
     getMediaUrl: builder.query<string, string>({
       queryFn: async (
         storageKey: string,
-        apiArg: BaseQueryApi,
-        extraOptions: {},
-        baseQuery: BaseQueryFn<any, unknown, FetchBaseQueryError, {}, FetchBaseQueryMeta>
+        apiArg: BaseQueryApi
       ): Promise<QueryReturnValue<string, FetchBaseQueryError, FetchBaseQueryMeta>> => {
         
         try {
@@ -18,7 +35,7 @@ export const mediaApi = api.injectEndpoints({
           if (!token) {
             return { 
               error: { 
-                status: 'UNAUTHORIZED', 
+                status: 'CUSTOM_ERROR', 
                 error: 'No auth token available' 
               } 
             };
@@ -33,8 +50,9 @@ export const mediaApi = api.injectEndpoints({
           if (!response.ok) {
             return { 
               error: { 
-                status: response.status, 
-                error: `HTTP ${response.status}` 
+                status: 'CUSTOM_ERROR',
+                error: `HTTP ${response.status}`,
+                data: { statusCode: response.status }
               } 
             };
           }
@@ -56,7 +74,7 @@ export const mediaApi = api.injectEndpoints({
       // Кэширование на 5 минут - изображения не часто меняются
       keepUnusedDataFor: 300, // 5 минут
       // Провайдер тэгов для инвалидации кэша
-      providesTags: (result, error, storageKey) => [
+      providesTags: (_result, _error, storageKey) => [
         { type: 'Media', id: storageKey }
       ],
     }),
@@ -65,4 +83,4 @@ export const mediaApi = api.injectEndpoints({
   overrideExisting: false,
 });
 
-export const { useGetMediaUrlQuery } = mediaApi;
+export const { useGetMediaUrlQuery, useGetSignedUrlsMutation } = mediaApi;

@@ -10,6 +10,7 @@ import SendIcon from '@mui/icons-material/Send';
 import CloseIcon from '@mui/icons-material/Close';
 import { ExtendedMessage } from '../types/message';
 import { LoadingMode } from '../hooks/useMessagePagination';
+import { useSignedUrls } from '../../../../context/SignedUrlContext';
 
 // Validation schema for editing messages
 const messageSchema = Yup.object().shape({
@@ -160,6 +161,72 @@ const MessageList: React.FC<MessageListProps> = ({
   handleEditMessage,
   handleDeleteMessage
 }) => {
+  const { signedUrls, fetchSignedUrls } = useSignedUrls();
+  const pendingRequestRef = React.useRef<Promise<void> | null>(null);
+
+  // Process attachments and fetch signed URLs
+  const processMessageAttachments = React.useCallback(async (newMessages: ExtendedMessage[]) => {
+    console.log('🔍 processMessageAttachments called with', newMessages.length, 'messages');
+    if (!newMessages.length) return;
+
+    const allAttachmentKeys: string[] = [];
+    
+    // Collect all attachment keys from messages
+    newMessages.forEach(message => {
+      if (message.attachments && message.attachments.length > 0) {
+        console.log(`📎 Message ${message.id} has ${message.attachments.length} attachments:`, message.attachments);
+        allAttachmentKeys.push(...message.attachments);
+      }
+    });
+
+    console.log('📋 Total attachment keys collected:', allAttachmentKeys.length, allAttachmentKeys);
+    if (allAttachmentKeys.length === 0) {
+      console.log('❌ No attachments found in messages');
+      return;
+    }
+
+    // Filter out URLs that already exist in memory
+    const missingKeys = allAttachmentKeys.filter(key => !signedUrls.has(key));
+    console.log('🔍 Missing keys that need to be fetched:', missingKeys.length, missingKeys);
+    console.log('📦 Current signedUrls size:', signedUrls.size);
+
+    if (missingKeys.length > 0) {
+      // Prevent duplicate requests
+      if (pendingRequestRef.current) {
+        console.log('⏳ Request already pending, waiting...');
+        await pendingRequestRef.current;
+        return;
+      }
+
+      // Create and store the request promise
+      const requestPromise = (async () => {
+        try {
+          console.log('🚀 Calling fetchSignedUrls with keys:', missingKeys);
+          await fetchSignedUrls(missingKeys);
+          console.log('✅ fetchSignedUrls completed successfully');
+        } catch (error) {
+          console.error('❌ Failed to fetch signed URLs:', error);
+        } finally {
+          pendingRequestRef.current = null;
+        }
+      })();
+
+      pendingRequestRef.current = requestPromise;
+      await requestPromise;
+    } else {
+      console.log('✅ All attachment URLs already in cache');
+    }
+  }, [fetchSignedUrls, signedUrls]);
+
+  // Process attachments when messages change
+  React.useEffect(() => {
+    console.log('📬 MessageList effect: messages changed, count:', messages.length);
+    if (messages.length > 0) {
+      console.log('📬 Sample message structure:', messages[0]);
+      processMessageAttachments(messages);
+    }
+  }, [messages, processMessageAttachments]);
+
   // Sort messages by creation time
   const sortedMessages = [...messages].sort((a, b) => {
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -677,6 +744,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   searchQuery={searchQuery}
                   currentUserId={user.id}
                   hubId={hubId}
+                  signedUrls={signedUrls}
                   loadingMode={paginationState.loadingMode}
                   onReply={(message) => {
                     setReplyingToMessage(message);

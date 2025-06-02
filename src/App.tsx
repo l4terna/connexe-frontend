@@ -4,6 +4,7 @@ import { NotificationProvider } from '@/context/NotificationContext';
 import { HubProvider } from '@/context/HubContext';
 import { WebSocketProvider } from '@/websocket/WebSocketContext';
 import { AppThemeProvider } from '@/context/ThemeContext';
+import { SignedUrlProvider } from '@/context/SignedUrlContext';
 import AppRouter from '@/router/AppRouter';
 
 const App: React.FC = () => {
@@ -14,9 +15,11 @@ const App: React.FC = () => {
       <CssBaseline />
       <NotificationProvider>
         <WebSocketProvider>
-          <HubProvider>
-            <AppRouter hubPageRef={hubPageRef} />
-          </HubProvider>
+          <SignedUrlProvider>
+            <HubProvider>
+              <AppRouter hubPageRef={hubPageRef} />
+            </HubProvider>
+          </SignedUrlProvider>
         </WebSocketProvider>
       </NotificationProvider>
     </AppThemeProvider>

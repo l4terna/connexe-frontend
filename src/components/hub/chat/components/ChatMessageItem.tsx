@@ -8,7 +8,7 @@ import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import UserAvatar from '../../../UserAvatar';
 import DOMPurify from 'dompurify';
 import { ExtendedMessage, ReplyMessage } from '../types/message';
-import SimpleMediaImage from './SimpleMediaImage';
+import SignedMediaImage from './SignedMediaImage';
 import MessageImagePreviewModal from './MessageImagePreviewModal';
 
 export interface ChatMessageItemProps {
@@ -26,6 +26,7 @@ export interface ChatMessageItemProps {
   searchQuery?: string;
   currentUserId: number;
   hubId?: number;
+  signedUrls?: Map<string, string>;
   loadingMode?: 'initial' | 'pagination' | 'around' | null;
   // Callback handlers
   onReply?: (message: ExtendedMessage) => void;
@@ -405,7 +406,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           }
                         }}
                       >
-                        <SimpleMediaImage
+                        <SignedMediaImage
                           storageKey={message.attachments[0]}
                           className="attachment-image"
                           alt="Attachment"
@@ -470,7 +471,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           }}
                           onClick={() => handleImageClick(attachment, index)}
                         >
-                          <SimpleMediaImage loadingMode={loadingMode}
+                          <SignedMediaImage loadingMode={loadingMode}
                             storageKey={attachment}
                             className="attachment-image"
                             alt="Attachment"
@@ -551,7 +552,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                         }}
                         onClick={() => handleImageClick(message.attachments[0], 0)}
                       >
-                        <SimpleMediaImage loadingMode={loadingMode}
+                        <SignedMediaImage loadingMode={loadingMode}
                           storageKey={message.attachments[0]}
                           className="attachment-image"
                           alt="Attachment"
@@ -626,7 +627,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             }}
                             onClick={() => handleImageClick(attachment, index + 1)}
                           >
-                            <SimpleMediaImage loadingMode={loadingMode}
+                            <SignedMediaImage loadingMode={loadingMode}
                               storageKey={attachment}
                               className="attachment-image"
                               alt="Attachment"
@@ -715,7 +716,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           }}
                           onClick={() => handleImageClick(attachment, index)}
                         >
-                          <SimpleMediaImage loadingMode={loadingMode}
+                          <SignedMediaImage loadingMode={loadingMode}
                             storageKey={attachment}
                             className="attachment-image"
                             alt="Attachment"
@@ -802,7 +803,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                         }}
                         onClick={() => handleImageClick(message.attachments[0], 0)}
                       >
-                        <SimpleMediaImage loadingMode={loadingMode}
+                        <SignedMediaImage loadingMode={loadingMode}
                           storageKey={message.attachments[0]}
                           className="attachment-image"
                           alt="Attachment"
@@ -878,7 +879,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             }}
                             onClick={() => handleImageClick(attachment, index + 1)}
                           >
-                            <SimpleMediaImage loadingMode={loadingMode}
+                            <SignedMediaImage loadingMode={loadingMode}
                               storageKey={attachment}
                               className="attachment-image"
                               alt="Attachment"

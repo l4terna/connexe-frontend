@@ -338,6 +338,21 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     }
   );
   
+  // Log query execution
+  React.useEffect(() => {
+    if (shouldRunMainQuery) {
+      console.log('[MainChatArea] Executing main query:', {
+        channelId: queryParams.channelId,
+        params: queryParams.params,
+        loadingMode: paginationState.loadingMode,
+        beforeId: paginationState.beforeId,
+        afterId: paginationState.afterId,
+        isLoading,
+        isFetching
+      });
+    }
+  }, [shouldRunMainQuery, queryParams, paginationState.loadingMode, paginationState.beforeId, paginationState.afterId, isLoading, isFetching]);
+  
   // Отдельный хук для around запроса
   const { data: aroundMessagesData, isLoading: isLoadingAround } = useGetMessagesQuery(
     (activeChannel?.type === ChannelType.TEXT || activeChannel?.type === ChannelType.PRIVATE) && paginationState.aroundMessageId && paginationState.loadingMode === 'around' ? {
@@ -513,8 +528,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Пропускаем если происходит переход к сообщению
     if (paginationState.isJumpingToMessage) return;
     
-    // Пропускаем обработку если у нас есть beforeId или afterId (это пагинация)
-    if (paginationState.beforeId !== null || paginationState.afterId !== null) return;
+    // Пропускаем обработку если у нас есть beforeId или afterId (это пагинация) - для пагинации есть отдельный эффект
+    if (paginationState.loadingMode === 'pagination') return;
     
     // Пропускаем если мы только что загрузили данные через around
     if (lastAroundId !== null && messages.length > 0) return;
@@ -570,7 +585,108 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         setLoadingWithTimeout(false); // Разблокируем пагинацию
       }, 100); // Небольшая задержка для гарантии завершения всех обновлений
     }
-  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationState.beforeId, paginationState.afterId, paginationActions, lastAroundId, messages.length]);
+  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationActions, lastAroundId, messages.length]);
+
+  // Separate effect for handling pagination
+  useEffect(() => {
+    if (!activeChannel || (activeChannel.type !== ChannelType.TEXT && activeChannel.type !== ChannelType.PRIVATE)) return;
+    
+    // Only handle pagination mode
+    if (paginationState.loadingMode !== 'pagination') return;
+    
+    // Skip if data is still loading
+    if (isLoading || isFetching) return;
+    
+    // Skip if jumping to message
+    if (paginationState.isJumpingToMessage) return;
+    
+    // Skip if no messages data
+    if (!messagesData || messagesData.length === 0) {
+      // No more messages to load
+      if (paginationState.beforeId) {
+        paginationActions.setHasMoreMessages(false);
+      }
+      if (paginationState.afterId) {
+        paginationActions.setHasMoreMessagesAfter(false);
+      }
+      
+      // Reset pagination state
+      setLoadingWithTimeout(false);
+      paginationActions.setLoadingMode(null);
+      paginationActions.setBeforeId(null);
+      paginationActions.setAfterId(null);
+      return;
+    }
+    
+    const newExtendedMessages = messagesData.map(convertToExtendedMessage);
+    
+    // Handle before pagination (load older messages)
+    if (paginationState.beforeId !== null) {
+      console.log('[MainChatArea] Processing before pagination:', {
+        beforeId: paginationState.beforeId,
+        newMessagesCount: newExtendedMessages.length,
+        currentMessagesCount: messages.length
+      });
+      
+      // Prepare scroll correction to maintain scroll position
+      if (scrollCorrectionRef.current) {
+        scrollCorrectionRef.current.prepareScrollCorrection();
+      }
+      
+      // Add new messages to the beginning
+      setMessages(prev => {
+        const combined = [...newExtendedMessages, ...prev];
+        // Remove duplicates
+        const uniqueMessages = combined.filter((msg, index, arr) => 
+          arr.findIndex(m => m.id === msg.id) === index
+        );
+        return uniqueMessages;
+      });
+      
+      // Check if we got fewer messages than requested (no more messages)
+      if (newExtendedMessages.length < MESSAGES_PER_PAGE) {
+        paginationActions.setHasMoreMessages(false);
+      }
+      
+      // Reset before pagination state
+      paginationActions.setBeforeId(null);
+    }
+    
+    // Handle after pagination (load newer messages)
+    if (paginationState.afterId !== null) {
+      console.log('[MainChatArea] Processing after pagination:', {
+        afterId: paginationState.afterId,
+        newMessagesCount: newExtendedMessages.length,
+        currentMessagesCount: messages.length
+      });
+      
+      // Add new messages to the end
+      setMessages(prev => {
+        const combined = [...prev, ...newExtendedMessages];
+        // Remove duplicates
+        const uniqueMessages = combined.filter((msg, index, arr) => 
+          arr.findIndex(m => m.id === msg.id) === index
+        );
+        return uniqueMessages;
+      });
+      
+      // Check if we got fewer messages than requested (no more messages)
+      if (newExtendedMessages.length < MESSAGES_PER_PAGE) {
+        paginationActions.setHasMoreMessagesAfter(false);
+      }
+      
+      // Reset after pagination state
+      paginationActions.setAfterId(null);
+      
+      // Clear cooldown for after pagination
+      paginationActions.clearAfterPaginationCooldown();
+    }
+    
+    // Reset loading state
+    setLoadingWithTimeout(false);
+    paginationActions.setLoadingMode(null);
+    
+  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, paginationState.loadingMode, paginationState.beforeId, paginationState.afterId, paginationState.isJumpingToMessage, paginationActions, setLoadingWithTimeout, setMessages, messages.length, scrollCorrectionRef]);
 
   // Store target message ID to pass to MessageList
   const targetMessageIdRef = useRef<number | null>(null);
@@ -1106,10 +1222,22 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Handle pagination loading
   useEffect(() => {
     if (messagesData && messagesData.length > 0 && paginationState.beforeId !== null && paginationState.afterId === null && paginationState.loadingMode === 'pagination' && !isLoading && !isFetching) {
+      console.log('[MainChatArea] Processing before pagination:', {
+        beforeId: paginationState.beforeId,
+        messagesCount: messagesData.length,
+        firstMessageId: messagesData[0]?.id,
+        lastMessageId: messagesData[messagesData.length - 1]?.id
+      });
+      
       try {
       // Проверяем, что данные действительно соответствуют запросу
-      const firstMessageId = messagesData[0]?.id;
-      if (firstMessageId && firstMessageId >= paginationState.beforeId) {
+      // При before пагинации должны приходить сообщения с ID меньше beforeId
+      const lastMessageId = messagesData[messagesData.length - 1]?.id;
+      if (lastMessageId && lastMessageId >= paginationState.beforeId) {
+        console.log('[MainChatArea] Invalid before pagination data - lastMessageId >= beforeId', {
+          lastMessageId,
+          beforeId: paginationState.beforeId
+        });
         // Сбрасываем состояние пагинации при ошибке
         setLoadingWithTimeout(false);
         paginationActions.setLoadingMode(null);
@@ -1128,6 +1256,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Check if we received less messages than requested
       if (messagesData.length < MESSAGES_PER_PAGE) {
+        console.log('[MainChatArea] No more messages to load (before pagination)');
         paginationActions.setHasMoreMessages(false);
       }
 
@@ -1139,9 +1268,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Convert new messages to ExtendedMessage
       const newExtendedMessages = messagesData.map(convertToExtendedMessage);
+      console.log('[MainChatArea] Converted new messages for before pagination:', newExtendedMessages.length);
       
       // Update the messages with proper Map-based deduplication
       setMessages((prev: ExtendedMessage[]) => {
+        console.log('[MainChatArea] Before merging - existing messages:', prev.length);
+        
         // Create a map for all messages with ID as key
         const messagesMap = new Map<number, ExtendedMessage>();
         
@@ -1153,8 +1285,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         });
         
         // Then add new messages, replacing any duplicates
+        let newMessagesAdded = 0;
         newExtendedMessages.forEach(msg => {
           if (typeof msg.id === 'number' && msg.id > 0) {
+            if (!messagesMap.has(msg.id)) {
+              newMessagesAdded++;
+            }
             messagesMap.set(msg.id, msg);
           }
         });
@@ -1162,7 +1298,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         // Convert map back to array and sort by creation date
         const mergedMessages = Array.from(messagesMap.values())
           .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-          
+        
+        console.log('[MainChatArea] After merging - total messages:', mergedMessages.length, 'new messages added:', newMessagesAdded);
 
         return mergedMessages;
       });

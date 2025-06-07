@@ -1,68 +1,30 @@
-import { api, baseQuery } from './api';
-import { BaseQueryFn, FetchBaseQueryError, FetchBaseQueryMeta, QueryReturnValue, BaseQueryApi } from '@reduxjs/toolkit/query';
+import { api } from '@/api/api';
+
+export interface MediaSignRequest {
+  storage_keys: string[];
+}
+
+export interface MediaSignature {
+  sign: string;
+  expires_at: string;
+  user_id: number;
+}
+
+export interface MediaSignResponse {
+  [storageKey: string]: MediaSignature; // storage_key -> signature object mapping
+}
 
 export const mediaApi = api.injectEndpoints({
   endpoints: (builder) => ({
-    getMediaUrl: builder.query<string, string>({
-      queryFn: async (
-        storageKey: string,
-        apiArg: BaseQueryApi,
-        extraOptions: {},
-        baseQuery: BaseQueryFn<any, unknown, FetchBaseQueryError, {}, FetchBaseQueryMeta>
-      ): Promise<QueryReturnValue<string, FetchBaseQueryError, FetchBaseQueryMeta>> => {
-        
-        try {
-          // Используем прямой fetch с токеном из store
-          const token = (apiArg.getState() as any).auth.token;
-          
-          if (!token) {
-            return { 
-              error: { 
-                status: 'UNAUTHORIZED', 
-                error: 'No auth token available' 
-              } 
-            };
-          }
-
-          const response = await fetch(`/api/v1/media/${storageKey}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          
-          if (!response.ok) {
-            return { 
-              error: { 
-                status: response.status, 
-                error: `HTTP ${response.status}` 
-              } 
-            };
-          }
-          
-          const blob = await response.blob();
-          
-          const objectUrl = URL.createObjectURL(blob);
-          
-          return { data: objectUrl };
-        } catch (error) {
-          return { 
-            error: { 
-              status: 'FETCH_ERROR', 
-              error: String(error) 
-            } 
-          };
-        }
-      },
-      // Кэширование на 5 минут - изображения не часто меняются
-      keepUnusedDataFor: 300, // 5 минут
-      // Провайдер тэгов для инвалидации кэша
-      providesTags: (result, error, storageKey) => [
-        { type: 'Media', id: storageKey }
-      ],
+    signMediaUrls: builder.mutation<MediaSignResponse, MediaSignRequest>({
+      query: (data) => ({
+        url: '/api/v1/media-sign',
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['Media']
     }),
   }),
-  // Обновляем тэги для кэширования
-  overrideExisting: false,
 });
 
-export const { useGetMediaUrlQuery } = mediaApi;
+export const { useSignMediaUrlsMutation } = mediaApi;

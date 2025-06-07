@@ -114,6 +114,11 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
         const oldestMessage = sortedMsgs[0]; // Первое сообщение в отсортированном массиве
         
         if (oldestMessage && lastBeforeIdRef.current !== oldestMessage.id) {
+          console.log('[useMessagePagination] Setting beforeId for pagination:', {
+            oldestMessageId: oldestMessage.id,
+            previousBeforeId: lastBeforeIdRef.current,
+            messagesCount: messages.length
+          });
           setBeforeId(oldestMessage.id);
           lastBeforeIdRef.current = oldestMessage.id;
           // Очищаем afterId чтобы избежать конфликтов
@@ -122,6 +127,10 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
           // Сбрасываем skipMainQuery чтобы запрос мог отправиться
           setSkipMainQuery(false);
         } else if (oldestMessage) {
+          console.log('[useMessagePagination] Duplicate before request detected, skipping:', {
+            oldestMessageId: oldestMessage.id,
+            lastBeforeId: lastBeforeIdRef.current
+          });
           // Если это дубликат запроса, сбрасываем состояние загрузки
           setLoadingWithTimeout(false);
           setLoadingMode(null);

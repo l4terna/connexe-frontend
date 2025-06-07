@@ -4,6 +4,7 @@ import { NotificationProvider } from '@/context/NotificationContext';
 import { HubProvider } from '@/context/HubContext';
 import { WebSocketProvider } from '@/websocket/WebSocketContext';
 import { AppThemeProvider } from '@/context/ThemeContext';
+import { MediaProvider } from '@/context/MediaContext';
 import AppRouter from '@/router/AppRouter';
 
 const App: React.FC = () => {
@@ -15,7 +16,9 @@ const App: React.FC = () => {
       <NotificationProvider>
         <WebSocketProvider>
           <HubProvider>
-            <AppRouter hubPageRef={hubPageRef} />
+            <MediaProvider>
+              <AppRouter hubPageRef={hubPageRef} />
+            </MediaProvider>
           </HubProvider>
         </WebSocketProvider>
       </NotificationProvider>

@@ -10,6 +10,8 @@ import SendIcon from '@mui/icons-material/Send';
 import CloseIcon from '@mui/icons-material/Close';
 import { ExtendedMessage } from '../types/message';
 import { LoadingMode } from '../hooks/useMessagePagination';
+import { useSignMediaUrlsMutation } from '../../../../api/media';
+import { useMedia } from '../../../../context/MediaContext';
 
 // Validation schema for editing messages
 const messageSchema = Yup.object().shape({
@@ -18,28 +20,39 @@ const messageSchema = Yup.object().shape({
     .max(2000, 'Message is too long')
 });
 
-// Helper functions
+// Helper functions with caching
+const dateFormatCache = new Map<string, string>();
+
 const formatDateForGroup = (timestamp: string) => {
+  const dateString = timestamp.split('T')[0]; // Use date part as cache key
+  
+  if (dateFormatCache.has(dateString)) {
+    return dateFormatCache.get(dateString)!;
+  }
+  
   const date = new Date(timestamp);
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
+  let result: string;
   if (date.toDateString() === today.toDateString()) {
-    return 'Сегодня';
-  }
-  if (date.toDateString() === yesterday.toDateString()) {
-    return 'Вчера';
+    result = 'Сегодня';
+  } else if (date.toDateString() === yesterday.toDateString()) {
+    result = 'Вчера';
+  } else {
+    const isCurrentYear = date.getFullYear() === today.getFullYear();
+    const formattedDate = date.toLocaleDateString([], {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      ...(isCurrentYear ? {} : { year: 'numeric' })
+    });
+    result = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
   }
   
-  const isCurrentYear = date.getFullYear() === today.getFullYear();
-  const formattedDate = date.toLocaleDateString([], {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    ...(isCurrentYear ? {} : { year: 'numeric' })
-  });
-  return formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+  dateFormatCache.set(dateString, result);
+  return result;
 };
 
 const isWithinTimeThreshold = (timestamp1: string, timestamp2: string, thresholdMinutes: number = 30) => {
@@ -160,10 +173,62 @@ const MessageList: React.FC<MessageListProps> = ({
   handleEditMessage,
   handleDeleteMessage
 }) => {
-  // Sort messages by creation time
-  const sortedMessages = [...messages].sort((a, b) => {
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-  });
+  const [signMediaUrls] = useSignMediaUrlsMutation();
+  const { setSignedUrls, hasSignedUrl } = useMedia();
+  
+  // Cache for tracking signing progress to prevent duplicate requests
+  const signingInProgress = React.useRef(new Set<string>());
+  
+  // Sort messages by creation time - memoized for performance
+  const sortedMessages = React.useMemo(() => {
+    return [...messages].sort((a, b) => {
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  }, [messages]);
+
+  // Effect to collect attachments and sign media URLs after messages are loaded
+  React.useEffect(() => {
+    if (!messages.length) return;
+
+    // Collect unique storage keys from all messages with attachments
+    const storageKeys = new Set<string>();
+    
+    messages.forEach(message => {
+      if (message.attachments && message.attachments.length > 0) {
+        message.attachments.forEach(attachment => {
+          if (attachment.trim()) { // Only add non-empty strings
+            storageKeys.add(attachment);
+          }
+        });
+      }
+    });
+
+    // Filter out already signed or currently signing URLs
+    const unsignedKeys = Array.from(storageKeys).filter(key => 
+      !hasSignedUrl(key) && !signingInProgress.current.has(key)
+    );
+
+    // If there are new storage keys to sign, make the API call
+    if (unsignedKeys.length > 0) {
+      // Mark these keys as currently being signed
+      unsignedKeys.forEach(key => signingInProgress.current.add(key));
+      
+      signMediaUrls({ storage_keys: unsignedKeys })
+        .unwrap()
+        .then(response => {
+          console.log('Media URLs signed:', response);
+          // Store the signed URLs in context
+          setSignedUrls(response);
+          // Remove from signing progress
+          unsignedKeys.forEach(key => signingInProgress.current.delete(key));
+        })
+        .catch(error => {
+          console.error('Failed to sign media URLs:', error);
+          // Remove from signing progress on error
+          unsignedKeys.forEach(key => signingInProgress.current.delete(key));
+        });
+    }
+  }, [messages, signMediaUrls, setSignedUrls, hasSignedUrl]);
 
   // Used in JSX conditional rendering below
   const emptyMessages = messages.length === 0 && tempMessages.size === 0;
@@ -181,8 +246,8 @@ const MessageList: React.FC<MessageListProps> = ({
     </Box>
   );
 
-  // Handle reply click function
-  const handleReplyClick = (replyId: number) => {
+  // Handle reply click function - moved outside component to prevent hook order issues
+  const handleReplyClick = React.useCallback((replyId: number) => {
     // Check if message exists in current list
     const messageExists = sortedMessages.some(msg => msg.id === replyId);
 
@@ -245,7 +310,44 @@ const MessageList: React.FC<MessageListProps> = ({
 
       // После загрузки around эффект автоматически прокрутит к сообщению
     }
-  };
+  }, [sortedMessages, setFocusedMessageId, setHighlightedMessages, highlightTimeoutRef, paginationActions, setMessages, setTempMessages, setTargetMessageId]);
+
+  // Create stable callbacks for event handlers to prevent re-renders
+  const onReplyCallback = React.useCallback((message: ExtendedMessage) => {
+    setReplyingToMessage(message);
+  }, [setReplyingToMessage]);
+
+  const onEditCallback = React.useCallback((messageId: ExtendedMessage | number) => 
+    setEditingMessageId(typeof messageId === 'number' ? messageId : messageId.id), 
+    [setEditingMessageId]
+  );
+
+  const onDeleteCallback = React.useCallback((messageId: ExtendedMessage | number) => 
+    handleDeleteMessage(typeof messageId === 'number' ? messageId : messageId.id), 
+    [handleDeleteMessage]
+  );
+
+  const onMouseEnterCallback = React.useCallback((e: React.MouseEvent<HTMLDivElement>, message?: ExtendedMessage) => {
+    // Отменяем таймер скрытия если он есть
+    if (hoverTimeoutRef?.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    if (setHoveredMessage && message) {
+      setHoveredMessage({ element: e.currentTarget, message });
+    }
+  }, [hoverTimeoutRef, setHoveredMessage]);
+
+  const onMouseLeaveCallback = React.useCallback(() => {
+    // Добавляем задержку перед скрытием
+    if (hoverTimeoutRef) {
+      hoverTimeoutRef.current = setTimeout(() => {
+        if (!isHoveringPortal?.current && setHoveredMessage) {
+          setHoveredMessage(null);
+        }
+      }, 100);
+    }
+  }, [hoverTimeoutRef, isHoveringPortal, setHoveredMessage]);
 
   // Render empty state (no messages or loading)
   const renderEmptyState = () => (
@@ -317,19 +419,40 @@ const MessageList: React.FC<MessageListProps> = ({
 
       requestAnimationFrame(() => {
         const scrollTop = container.scrollTop;
+        const scrollHeight = container.scrollHeight;
+        const clientHeight = container.clientHeight;
 
-        // Check if scrolled to 20% from top for pagination
-        const scrollPercentageFromTop = scrollTop / container.scrollHeight;
-        if (scrollPercentageFromTop < 0.2 && 
+        // Check if scrolled to within 20% from top for before pagination
+        const distanceFromTop = scrollTop;
+        const twentyPercentFromTop = scrollHeight * 0.2;
+        if (distanceFromTop <= twentyPercentFromTop && 
             paginationState.hasMoreMessages && 
             !paginationState.isJumpingToMessage &&
             paginationState.loadingMode !== 'pagination' &&
             paginationState.loadingMode !== 'around') {
           
-          // Trigger pagination
+          // Trigger before pagination
           const oldestMessage = sortedMessages[0];
           if (oldestMessage) {
             paginationActions.setBeforeId(oldestMessage.id);
+            paginationActions.setLoadingMode('pagination');
+          }
+        }
+
+        // Check if scrolled to 80% from bottom for after pagination
+        // Only if enableAfterPagination is true (set after around loading)
+        const scrollPercentageFromBottom = (scrollTop + clientHeight) / scrollHeight;
+        if (scrollPercentageFromBottom > 0.8 && 
+            paginationState.enableAfterPagination &&
+            paginationState.hasMoreMessagesAfter && 
+            !paginationState.isJumpingToMessage &&
+            paginationState.loadingMode !== 'pagination' &&
+            paginationState.loadingMode !== 'around') {
+          
+          // Trigger after pagination
+          const newestMessage = sortedMessages[sortedMessages.length - 1];
+          if (newestMessage) {
+            paginationActions.setAfterId(newestMessage.id);
             paginationActions.setLoadingMode('pagination');
           }
         }
@@ -354,6 +477,15 @@ const MessageList: React.FC<MessageListProps> = ({
         (scrollToMessageIdRef?.current || null);
         
     if (messageIdToScroll === null) return;
+    
+    // Не прокручиваем автоматически если включена пагинация after (пользователь скроллит вниз)
+    if (paginationState.enableAfterPagination && paginationState.loadingMode === 'pagination' && paginationState.afterId) {
+      // Сбрасываем значение в ref без прокрутки
+      if (scrollToMessageIdRef) {
+        scrollToMessageIdRef.current = null;
+      }
+      return;
+    }
     
     // Ищем элемент сообщения по ID
     const messageElement = container.querySelector(`[data-msg-id="${messageIdToScroll}"]`);
@@ -400,7 +532,23 @@ const MessageList: React.FC<MessageListProps> = ({
         }, 1500);
       }
     }
-  }, [messages, forceScrollToMessageId, scrollToMessageIdRef?.current, focusedMessageId, highlightTimeoutRef, setHighlightedMessages, setFocusedMessageId, scrollCorrectionRef]);
+  }, [messages, forceScrollToMessageId, scrollToMessageIdRef?.current, focusedMessageId, highlightTimeoutRef, setHighlightedMessages, setFocusedMessageId, scrollCorrectionRef, paginationState.enableAfterPagination, paginationState.loadingMode, paginationState.afterId]);
+
+  // Эффект для очистки подсветки при пагинации
+  React.useEffect(() => {
+    // Очищаем подсветку при запуске пагинации after (пользователь скроллит вниз)
+    if (paginationState.enableAfterPagination && paginationState.loadingMode === 'pagination' && paginationState.afterId) {
+      // Очищаем таймер подсветки
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+        highlightTimeoutRef.current = null;
+      }
+      
+      // Убираем подсветку
+      setHighlightedMessages(new Set());
+      setFocusedMessageId(null);
+    }
+  }, [paginationState.enableAfterPagination, paginationState.loadingMode, paginationState.afterId, highlightTimeoutRef, setHighlightedMessages, setFocusedMessageId]);
 
   return (
     <Box 
@@ -473,7 +621,6 @@ const MessageList: React.FC<MessageListProps> = ({
           {(() => {
             let result: React.ReactElement[] = [];
             let prevAuthorId: number | null = null;
-            let prevMessageTime: string | null = null;
             let currentGroup: React.ReactElement[] = [];
             let currentDateString: string | null = null;
             let processedDates = new Set<string>();
@@ -678,38 +825,17 @@ const MessageList: React.FC<MessageListProps> = ({
                   currentUserId={user.id}
                   hubId={hubId}
                   loadingMode={paginationState.loadingMode}
-                  onReply={(message) => {
-                    setReplyingToMessage(message);
-                  }}
-                  onEdit={(messageId) => setEditingMessageId(typeof messageId === 'number' ? messageId : messageId.id)}
-                  onDelete={(messageId) => handleDeleteMessage(typeof messageId === 'number' ? messageId : messageId.id)}
+                  onReply={onReplyCallback}
+                  onEdit={onEditCallback}
+                  onDelete={onDeleteCallback}
                   onReplyClick={handleReplyClick}
-                  onMouseEnter={(e, message) => {
-                    // Отменяем таймер скрытия если он есть
-                    if (hoverTimeoutRef?.current) {
-                      clearTimeout(hoverTimeoutRef.current);
-                      hoverTimeoutRef.current = null;
-                    }
-                    if (setHoveredMessage && message) {
-                      setHoveredMessage({ element: e.currentTarget, message });
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    // Добавляем задержку перед скрытием
-                    if (hoverTimeoutRef) {
-                      hoverTimeoutRef.current = setTimeout(() => {
-                        if (!isHoveringPortal?.current && setHoveredMessage) {
-                          setHoveredMessage(null);
-                        }
-                      }, 100);
-                    }
-                  }}
+                  onMouseEnter={onMouseEnterCallback}
+                  onMouseLeave={onMouseLeaveCallback}
                 />
               );
 
               currentGroup.push(messageElement);
               prevAuthorId = msg.author.id;
-              prevMessageTime = msg.created_at;
             });
 
             if (currentGroup.length > 0) {

@@ -47,26 +47,11 @@ const SearchBar: React.FC<SearchBarProps> = ({
   const isSearching = hookValues.isSearching;
   const showSearchResults = hookValues.showSearchResults;
   const setShowSearchResults = hookValues.setShowSearchResults;
-  const hasMore = hookValues.hasMore;
-  const isLoadingMore = hookValues.isLoadingMore;
   const searchInputRef = hookValues.searchInputRef;
   const searchResultsRef = hookValues.searchResultsRef;
   const handleSearchInputChange = hookValues.handleSearchInputChange;
   const clearSearch = hookValues.clearSearch;
-  const loadMore = hookValues.loadMore;
   const hookHandleResultClick = hookValues.handleResultClick;
-  // Мемоизируем обработчик скролла
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const container = e.currentTarget;
-    const { scrollHeight, scrollTop, clientHeight } = container;
-    
-    // Проверяем, достигли ли конца списка
-    if (scrollHeight - scrollTop - clientHeight < 100) {
-      if (loadMore && hasMore && !isLoadingMore) {
-        loadMore();
-      }
-    }
-  }, [loadMore, hasMore, isLoadingMore]);
 
   // Мемоизируем обработчик клика на результат
   const handleResultClick = useCallback((message: Message) => {
@@ -81,12 +66,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
     // Не закрываем поиск здесь, чтобы не прерывать навигацию
   }, [onSearchResultClick, hookHandleResultClick]);
 
-  // Мемоизируем количество результатов
-  const resultsCount = searchResults?.length || 0;
-  const resultsText = useMemo(() => 
-    `${resultsCount} ${resultsCount === 1 ? 'result' : 'results'}`,
-    [resultsCount]
-  );
 
   if (!searchMode) {
     return (
@@ -179,24 +158,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
                     />
                   )}
                 </Field>
-                {searchQuery.trim() && (
-                  <Typography 
-                    variant="caption" 
-                    sx={{ 
-                      position: 'absolute',
-                      right: 0,
-                      top: '-18px',
-                      color: hasResults ? '#00FFBA' : '#FF69B4',
-                      fontSize: '0.7rem',
-                      fontWeight: 500,
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      background: 'rgba(0,0,0,0.3)'
-                    }}
-                  >
-                    {resultsText}
-                  </Typography>
-                )}
               </Box>
               <IconButton 
                 type="button"
@@ -229,7 +190,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
         <Box
           ref={searchResultsRef}
           onMouseDown={(e) => e.preventDefault()}
-          onScroll={handleScroll}
           sx={{
             position: 'absolute',
             top: '100%',
@@ -245,9 +205,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
             zIndex: 10002,
             backdropFilter: 'blur(15px)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-            // Оптимизация скролла
-            willChange: 'scroll-position',
-            contain: 'layout style paint',
             '&::-webkit-scrollbar': {
               width: '6px',
             },
@@ -296,7 +253,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
             </Box>
           )}
           
-          {/* Search results with memoized items */}
+          {/* Search results */}
           {!isSearching && hasResults && searchResults.map((msg, index) => (
             <SearchResultItem
               key={`${msg.id}-${index}`}
@@ -305,25 +262,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
               onResultClick={handleResultClick}
             />
           ))}
-          
-          {/* Loading more indicator */}
-          {isLoadingMore && (
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              <Box 
-                sx={{ 
-                  width: 20, 
-                  height: 20, 
-                  border: '2px solid rgba(255,255,255,0.1)',
-                  borderTop: '2px solid #00CFFF',
-                  borderRadius: '50%',
-                  animation: 'spin 1s linear infinite',
-                }}
-              />
-              <Typography sx={{ ml: 1, color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>
-                Загрузка...
-              </Typography>
-            </Box>
-          )}
         </Box>
       )}
     </Box>

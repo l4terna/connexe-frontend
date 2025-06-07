@@ -1354,16 +1354,14 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         return;
       }
       
+
       // Check if we received less messages than requested
       if (dataToProcess.length < MESSAGES_PER_PAGE) {
         paginationActions.setHasMoreMessagesAfter(false);
         // Если получили меньше сообщений чем запрашивали, значит достигли конца
         // и можно отключить пагинацию вниз
         paginationActions.setEnableAfterPagination(false);
-      } 
-
-      // Temporarily set disableAutoScroll to prevent automatic scrolling to bottom
-      setDisableAutoScroll(true);
+      }
       
       // Convert new messages to ExtendedMessage
       const newExtendedMessages = dataToProcess.map(convertToExtendedMessage);
@@ -1399,6 +1397,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       requestAnimationFrame(() => {
         setLoadingWithTimeout(false);
         paginationActions.setLoadingMode(null);
+        
+        // Re-enable auto scroll after pagination is complete
+        setDisableAutoScroll(false);
+        
         // Сбрасываем afterId если достигли конца
         if (!paginationState.hasMoreMessagesAfter) {
           paginationActions.setAfterId(null);

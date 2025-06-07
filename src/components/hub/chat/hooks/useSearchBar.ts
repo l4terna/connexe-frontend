@@ -19,16 +19,17 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
   const searchResultsRef = useRef<HTMLDivElement>(null);
   
   // Состояние для пагинации поиска
-  const [beforeId, setBeforeId] = useState<number | undefined>(undefined);
+  const [currentPage, setCurrentPage] = useState<number>(0);
   const [allResults, setAllResults] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(true);
+  const [lastProcessedPage, setLastProcessedPage] = useState<number>(-1);
   
   // API запрос для поиска сообщений
   const queryParams = activeChannelId !== null && debouncedSearchQuery.trim() ? {
     channelId: activeChannelId,
     search: debouncedSearchQuery,
-    size: 20,
-    ...(beforeId ? { beforeId } : {})
+    size: 50,
+    ...(currentPage > 0 ? { page: currentPage } : {})
   } : undefined;
 
   const {
@@ -53,28 +54,36 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
   // Эффект для обработки результатов поиска
   useEffect(() => {
     if (searchResultsData) {
-      if (beforeId) {
-        // Пагинация - добавляем к существующим результатам
+      if (currentPage > 0 && currentPage !== lastProcessedPage) {
+        // Пагинация - добавляем к существующим результатам только если это новая страница
         setAllResults(prev => [...prev, ...searchResultsData]);
-      } else {
+        setLastProcessedPage(currentPage);
+      } else if (currentPage === 0 && lastProcessedPage !== -1) {
         // Новый поиск - заменяем результаты
         setAllResults(searchResultsData);
+        setLastProcessedPage(0);
+      } else if (currentPage === 0 && lastProcessedPage === -1) {
+        // Первая загрузка результатов
+        setAllResults(searchResultsData);
+        setLastProcessedPage(0);
       }
       
       // Проверяем, есть ли еще результаты
       setHasMore(searchResultsData.length >= 20);
     }
-  }, [searchResultsData, beforeId]);
+  }, [searchResultsData, currentPage, lastProcessedPage]);
 
   // Очистка результатов при изменении запроса
   useEffect(() => {
     if (!debouncedSearchQuery.trim()) {
       setAllResults([]);
-      setBeforeId(undefined);
+      setCurrentPage(0);
       setHasMore(true);
+      setLastProcessedPage(-1);
     } else {
       // При новом запросе сбрасываем пагинацию
-      setBeforeId(undefined);
+      setCurrentPage(0);
+      setLastProcessedPage(-1);
     }
   }, [debouncedSearchQuery]);
 
@@ -93,14 +102,13 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
 
   // Загрузка дополнительных результатов
   const loadMore = useCallback(() => {
-    if (hasMore && allResults.length > 0 && !isSearching) {
-      const lastResult = allResults[allResults.length - 1];
-      setBeforeId(lastResult.id);
+    if (hasMore && !isSearching) {
+      setCurrentPage(prev => prev + 1);
     }
-  }, [hasMore, allResults, isSearching]);
+  }, [hasMore, isSearching]);
 
   // Состояние загрузки дополнительных результатов
-  const isLoadingMore = isSearching && beforeId !== undefined;
+  const isLoadingMore = isSearching && currentPage > 0;
 
   // Очистка поиска
   const clearSearch = useCallback(() => {
@@ -109,8 +117,9 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
     setShowSearchResults(false);
     setSearchMode(false);
     setAllResults([]);
-    setBeforeId(undefined);
+    setCurrentPage(0);
     setHasMore(true);
+    setLastProcessedPage(-1);
     
     if (searchInputRef.current) {
       searchInputRef.current.value = '';

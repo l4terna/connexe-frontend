@@ -62,6 +62,12 @@
     return diffInMinutes <= thresholdMinutes;
   };
 
+  const isSameDay = (timestamp1: string, timestamp2: string) => {
+    const date1 = new Date(timestamp1);
+    const date2 = new Date(timestamp2);
+    return date1.toDateString() === date2.toDateString();
+  };
+
   interface MessageListProps {
     activeChannel: Channel | null;
     messages: ExtendedMessage[];
@@ -649,6 +655,7 @@
             {(() => {
               let result: React.ReactElement[] = [];
               let prevAuthorId: number | null = null;
+              let prevMessageTimestamp: string | null = null;
               let currentGroup: React.ReactElement[] = [];
               let currentDateString: string | null = null;
               let processedDates = new Set<string>();
@@ -677,27 +684,39 @@
                         display: 'flex',
                         justifyContent: 'center',
                         alignItems: 'center',
-                        my: 2,
+                        my: 3,
                         position: 'relative',
+                        '&::before': {
+                          content: '""',
+                          position: 'absolute',
+                          top: '50%',
+                          left: 0,
+                          right: 0,
+                          height: '1px',
+                          background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 20%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0.2) 80%, transparent 100%)',
+                          zIndex: 0
+                        }
                       }}
                     >
                       <Box
                         sx={{
-                          backgroundColor: 'rgba(30,30,47,0.85)',
+                          backgroundColor: 'rgba(30,30,47,0.95)',
                           backdropFilter: 'blur(8px)',
-                          px: 2,
-                          py: 0.75,
-                          borderRadius: '12px',
-                          boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+                          px: 3,
+                          py: 1,
+                          borderRadius: '16px',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+                          border: '1px solid rgba(255,255,255,0.15)',
                           zIndex: 1
                         }}
                       >
                         <Typography
                           variant="body2"
                           sx={{
-                            color: 'text.secondary',
-                            fontWeight: 500,
-                            fontSize: '0.85rem'
+                            color: 'rgba(255,255,255,0.85)',
+                            fontWeight: 600,
+                            fontSize: '0.8rem',
+                            letterSpacing: '0.5px'
                           }}
                         >
                           {formatDateForGroup(msg.created_at)}
@@ -711,7 +730,13 @@
                 }
 
                 const isTempMessage = 'temp_id' in msg;
-                const isFirstOfGroup = msg.author?.id !== prevAuthorId;
+                
+                // Check if this message should start a new group
+                const isFirstOfGroup = 
+                  msg.author?.id !== prevAuthorId || // Different author
+                  !prevMessageTimestamp || // No previous message
+                  !isWithinTimeThreshold(msg.created_at, prevMessageTimestamp, 30) || // More than 30 minutes apart
+                  !isSameDay(msg.created_at, prevMessageTimestamp); // Different day
                 
                 const messageElement = editingMessageId === msg.id ? (
                   <Box
@@ -863,6 +888,7 @@
 
                 currentGroup.push(messageElement);
                 prevAuthorId = msg.author.id;
+                prevMessageTimestamp = msg.created_at;
               });
 
               if (currentGroup.length > 0) {

@@ -1006,12 +1006,19 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                 }}
               />
             )}
+            
+            {/* Placeholder для сообщений без текста */}
+            {!message.content && hasAttachments && (
+              <Box sx={{ minHeight: '20px' }} />
+            )}
+            
+            {/* Message metadata - время и статус прочтения */}
             <Box sx={{ 
               display: 'flex',
               alignItems: 'center',
               gap: 0.5,
               position: 'absolute',
-              top: 0,
+              bottom: message.content ? '7px' : '22px',
               right: 0,
               padding: '0 8px',
             }}>

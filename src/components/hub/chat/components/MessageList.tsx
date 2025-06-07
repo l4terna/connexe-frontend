@@ -405,65 +405,69 @@ const MessageList: React.FC<MessageListProps> = ({
     </Box>
   );
 
-  // Add scroll pagination effect
+  // Pagination trigger refs
+  const topTriggerRef = React.useRef<HTMLDivElement>(null);
+  const bottomTriggerRef = React.useRef<HTMLDivElement>(null);
+
+  // Intersection Observer for pagination
   React.useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
+    const topTrigger = topTriggerRef.current;
+    const bottomTrigger = bottomTriggerRef.current;
+    
+    if (!topTrigger || !bottomTrigger) return;
 
-    let scrollThrottle = false;
-
-    const handleScroll = () => {
-      // Throttle scroll updates
-      if (scrollThrottle) return;
-      scrollThrottle = true;
-
-      requestAnimationFrame(() => {
-        const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
-        const clientHeight = container.clientHeight;
-
-        // Check if scrolled to within 20% from top for before pagination
-        const distanceFromTop = scrollTop;
-        const twentyPercentFromTop = scrollHeight * 0.2;
-        if (distanceFromTop <= twentyPercentFromTop && 
-            paginationState.hasMoreMessages && 
-            !paginationState.isJumpingToMessage &&
-            paginationState.loadingMode !== 'pagination' &&
-            paginationState.loadingMode !== 'around') {
-          
-          // Trigger before pagination
-          const oldestMessage = sortedMessages[0];
-          if (oldestMessage) {
-            paginationActions.setBeforeId(oldestMessage.id);
-            paginationActions.setLoadingMode('pagination');
-          }
+    const handleTopIntersection = (entries: IntersectionObserverEntry[]) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && 
+          paginationState.hasMoreMessages && 
+          !paginationState.isJumpingToMessage &&
+          paginationState.loadingMode !== 'pagination' &&
+          paginationState.loadingMode !== 'around') {
+        
+        const oldestMessage = sortedMessages[0];
+        if (oldestMessage) {
+          paginationActions.setBeforeId(oldestMessage.id);
+          paginationActions.setLoadingMode('pagination');
         }
-
-        // Check if scrolled to 80% from bottom for after pagination
-        // Only if enableAfterPagination is true (set after around loading)
-        const scrollPercentageFromBottom = (scrollTop + clientHeight) / scrollHeight;
-        if (scrollPercentageFromBottom > 0.8 && 
-            paginationState.enableAfterPagination &&
-            paginationState.hasMoreMessagesAfter && 
-            !paginationState.isJumpingToMessage &&
-            paginationState.loadingMode !== 'pagination' &&
-            paginationState.loadingMode !== 'around') {
-          
-          // Trigger after pagination
-          const newestMessage = sortedMessages[sortedMessages.length - 1];
-          if (newestMessage) {
-            paginationActions.setAfterId(newestMessage.id);
-            paginationActions.setLoadingMode('pagination');
-          }
-        }
-
-        scrollThrottle = false;
-      });
+      }
     };
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [sortedMessages, paginationState, paginationActions]);
+    const handleBottomIntersection = (entries: IntersectionObserverEntry[]) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && 
+          paginationState.enableAfterPagination &&
+          paginationState.hasMoreMessagesAfter && 
+          !paginationState.isJumpingToMessage &&
+          paginationState.loadingMode !== 'pagination' &&
+          paginationState.loadingMode !== 'around') {
+        
+        const newestMessage = sortedMessages[sortedMessages.length - 1];
+        if (newestMessage) {
+          paginationActions.setAfterId(newestMessage.id);
+          paginationActions.setLoadingMode('pagination');
+        }
+      }
+    };
+
+    // Create observers with different thresholds
+    const topObserver = new IntersectionObserver(handleTopIntersection, {
+      root: messagesContainerRef.current,
+      threshold: 0.1
+    });
+
+    const bottomObserver = new IntersectionObserver(handleBottomIntersection, {
+      root: messagesContainerRef.current,
+      threshold: 0.1
+    });
+
+    topObserver.observe(topTrigger);
+    bottomObserver.observe(bottomTrigger);
+
+    return () => {
+      topObserver.disconnect();
+      bottomObserver.disconnect();
+    };
+  }, [sortedMessages, paginationState, paginationActions, messagesContainerRef]);
   
   // Эффект для прокрутки к сообщению по scrollToMessageIdRef или forceScrollToMessageId
   React.useEffect(() => {
@@ -616,6 +620,9 @@ const MessageList: React.FC<MessageListProps> = ({
             </Box>
           </Fade>
 
+
+          {/* Pagination triggers */}
+          <div ref={topTriggerRef} style={{ height: '1px', margin: '20px 0' }} />
 
           {/* Messages */}
           {(() => {
@@ -845,6 +852,9 @@ const MessageList: React.FC<MessageListProps> = ({
 
             return result;
           })()}
+
+          {/* Bottom pagination trigger */}
+          <div ref={bottomTriggerRef} style={{ height: '1px', margin: '20px 0' }} />
 
           {/* For properly tracking the end of messages for scrolling */}
           <div ref={messagesEndRef} />

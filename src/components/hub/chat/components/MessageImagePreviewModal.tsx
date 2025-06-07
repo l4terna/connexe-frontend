@@ -1,17 +1,127 @@
-import React, { useEffect } from 'react';
-import { Box, Modal, Fade, Typography } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import React, { useCallback, useMemo } from 'react';
+import { Dialog, IconButton, styled, Box } from '@mui/material';
+import { Close, ArrowBackIos, ArrowForwardIos } from '@mui/icons-material';
+import { colors } from '../../../../theme/theme';
 import SimpleMediaImage from './SimpleMediaImage';
 
 interface MessageImagePreviewModalProps {
   open: boolean;
-  images: string[]; // Array of storage keys
+  images: string[];
   currentIndex: number;
   onClose: () => void;
   onNavigate: (index: number) => void;
 }
+
+const StyledDialog = styled(Dialog)({
+  '& .MuiBackdrop-root': {
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    backdropFilter: 'blur(8px)',
+  },
+  '& .MuiDialog-paper': {
+    backgroundColor: 'transparent',
+    boxShadow: 'none',
+    maxWidth: 'none',
+    maxHeight: 'none',
+    margin: 0,
+    overflow: 'hidden',
+  },
+});
+
+const ImageContainer = styled('div')({
+  position: 'relative',
+  width: '100vw',
+  height: '100vh',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  userSelect: 'none',
+});
+
+const NavButton = styled(IconButton)({
+  position: 'absolute',
+  top: '50%',
+  transform: 'translateY(-50%)',
+  width: 56,
+  height: 56,
+  backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  border: `1px solid ${colors.primary}30`,
+  color: colors.text.primary,
+  transition: 'all 0.2s ease',
+  '&:hover': {
+    backgroundColor: `${colors.primary}20`,
+    borderColor: `${colors.primary}60`,
+    transform: 'translateY(-50%) scale(1.1)',
+    boxShadow: `0 0 20px ${colors.primary}40`,
+  },
+  '&:active': {
+    transform: 'translateY(-50%) scale(0.95)',
+  },
+});
+
+const CloseButton = styled(IconButton)({
+  position: 'absolute',
+  top: 20,
+  right: 20,
+  width: 48,
+  height: 48,
+  backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  border: '1px solid rgba(255, 61, 113, 0.3)',
+  color: colors.text.primary,
+  transition: 'all 0.2s ease',
+  '&:hover': {
+    backgroundColor: 'rgba(255, 61, 113, 0.2)',
+    borderColor: 'rgba(255, 61, 113, 0.6)',
+    transform: 'scale(1.1) rotate(90deg)',
+    boxShadow: '0 0 20px rgba(255, 61, 113, 0.4)',
+  },
+});
+
+const ImageCounter = styled(Box)({
+  position: 'absolute',
+  bottom: 24,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  padding: '8px 16px',
+  backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  border: `1px solid ${colors.primary}30`,
+  borderRadius: '20px',
+  color: colors.text.primary,
+  fontSize: '14px',
+  fontWeight: 600,
+  backdropFilter: 'blur(10px)',
+});
+
+const DotsContainer = styled(Box)({
+  position: 'absolute',
+  bottom: 60,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  gap: '8px',
+  alignItems: 'center',
+});
+
+const Dot = styled('button')<{ active?: boolean }>(({ active }) => ({
+  width: active ? 24 : 8,
+  height: 8,
+  border: 'none',
+  borderRadius: '4px',
+  backgroundColor: active ? colors.primary : 'rgba(255, 255, 255, 0.3)',
+  cursor: 'pointer',
+  transition: 'all 0.2s ease',
+  '&:hover': {
+    backgroundColor: active ? colors.primary : 'rgba(255, 255, 255, 0.5)',
+    transform: 'scale(1.2)',
+  },
+}));
+
+const StyledImageContainer = styled(Box)({
+  maxWidth: 'calc(100vw - 120px)',
+  maxHeight: 'calc(100vh - 120px)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+});
 
 const MessageImagePreviewModal: React.FC<MessageImagePreviewModalProps> = ({
   open,
@@ -20,279 +130,113 @@ const MessageImagePreviewModal: React.FC<MessageImagePreviewModalProps> = ({
   onClose,
   onNavigate,
 }) => {
-  // Handle keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!open) return;
-      
-      if (e.key === 'Escape') {
-        onClose();
-      } else if (e.key === 'ArrowLeft' && currentIndex > 0) {
-        onNavigate(currentIndex - 1);
-      } else if (e.key === 'ArrowRight' && currentIndex < images.length - 1) {
-        onNavigate(currentIndex + 1);
-      }
-    };
+  const currentStorageKey = useMemo(() => images[currentIndex], [images, currentIndex]);
+  
+  const handlePrevious = useCallback(() => {
+    if (currentIndex > 0) onNavigate(currentIndex - 1);
+  }, [currentIndex, onNavigate]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, currentIndex, images.length, onClose, onNavigate]);
+  const handleNext = useCallback(() => {
+    if (currentIndex < images.length - 1) onNavigate(currentIndex + 1);
+  }, [currentIndex, images.length, onNavigate]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'Escape':
+        onClose();
+        break;
+      case 'ArrowLeft':
+        handlePrevious();
+        break;
+      case 'ArrowRight':
+        handleNext();
+        break;
+    }
+  }, [onClose, handlePrevious, handleNext]);
+
+  if (!currentStorageKey) return null;
 
   return (
-    <Modal
+    <StyledDialog
       open={open}
       onClose={onClose}
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backdropFilter: 'blur(20px)',
-        backgroundColor: 'rgba(10, 10, 26, 0.85)',
-      }}
+      fullScreen
+      onKeyDown={handleKeyDown}
     >
-      <Fade in={open}>
-        <Box
-          sx={{
-            position: 'relative',
-            width: '100vw',
-            height: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(13,13,26,0.95) 0%, rgba(26,26,46,0.95) 100%)',
-            outline: 'none',
+      <ImageContainer onClick={onClose}>
+        <StyledImageContainer onClick={(e) => e.stopPropagation()}>
+          <SimpleMediaImage
+            storageKey={currentStorageKey}
+            alt="Preview"
+            sx={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              objectFit: 'contain',
+              borderRadius: '12px',
+              filter: 'drop-shadow(0 8px 32px rgba(0,0,0,0.8))',
+              transition: 'transform 0.2s ease',
+              '&:hover': {
+                transform: 'scale(1.01)',
+              },
+            }}
+          />
+        </StyledImageContainer>
+        
+        {currentIndex > 0 && (
+          <NavButton
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePrevious();
+            }}
+            style={{ left: 32 }}
+          >
+            <ArrowBackIos />
+          </NavButton>
+        )}
+        
+        {currentIndex < images.length - 1 && (
+          <NavButton
+            onClick={(e) => {
+              e.stopPropagation();
+              handleNext();
+            }}
+            style={{ right: 32 }}
+          >
+            <ArrowForwardIos />
+          </NavButton>
+        )}
+        
+        <CloseButton
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
           }}
-          onClick={onClose}
         >
-          {images[currentIndex] && (
-            <>
-              <Box
-                sx={{
-                  position: 'relative',
-                  maxWidth: '90vw',
-                  maxHeight: '90vh',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <SimpleMediaImage
-                  storageKey={images[currentIndex]}
-                  alt="Fullscreen preview"
-                  sx={{
-                    maxWidth: '100%',
-                    maxHeight: '90vh',
-                    objectFit: 'contain',
-                    borderRadius: 2,
-                    boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
-                    width: 'auto',
-                    height: 'auto',
+          <Close />
+        </CloseButton>
+        
+        {images.length > 1 && (
+          <>
+            <ImageCounter>
+              {currentIndex + 1} / {images.length}
+            </ImageCounter>
+            
+            <DotsContainer>
+              {images.map((_, index) => (
+                <Dot
+                  key={index}
+                  active={index === currentIndex}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNavigate(index);
                   }}
                 />
-              </Box>
-              
-              {/* Navigation arrows */}
-              {currentIndex > 0 && (
-                <Box
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onNavigate(currentIndex - 1);
-                  }}
-                  sx={{
-                    position: 'absolute',
-                    left: 40,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 56,
-                    height: 56,
-                    borderRadius: '50%',
-                    background: 'linear-gradient(135deg, rgba(255, 105, 180, 0.1) 0%, rgba(30, 144, 255, 0.1) 100%)',
-                    backdropFilter: 'blur(20px)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    '&::before': {
-                      content: '""',
-                      position: 'absolute',
-                      inset: -2,
-                      borderRadius: '50%',
-                      padding: 2,
-                      background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
-                      mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                      maskComposite: 'exclude',
-                      opacity: 0,
-                      transition: 'opacity 0.3s',
-                    },
-                    '&:hover': { 
-                      transform: 'translateX(-4px) scale(1.1)',
-                      boxShadow: '0 8px 32px rgba(255, 105, 180, 0.4)',
-                      background: 'linear-gradient(135deg, rgba(255, 105, 180, 0.2) 0%, rgba(30, 144, 255, 0.2) 100%)',
-                      '&::before': {
-                        opacity: 1,
-                      },
-                    },
-                  }}
-                >
-                  <ChevronLeftIcon sx={{ fontSize: 28, color: 'rgba(255, 255, 255, 0.9)' }} />
-                </Box>
-              )}
-              
-              {currentIndex < images.length - 1 && (
-                <Box
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onNavigate(currentIndex + 1);
-                  }}
-                  sx={{
-                    position: 'absolute',
-                    right: 40,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 56,
-                    height: 56,
-                    borderRadius: '50%',
-                    background: 'linear-gradient(135deg, rgba(255, 105, 180, 0.1) 0%, rgba(30, 144, 255, 0.1) 100%)',
-                    backdropFilter: 'blur(20px)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    '&::before': {
-                      content: '""',
-                      position: 'absolute',
-                      inset: -2,
-                      borderRadius: '50%',
-                      padding: 2,
-                      background: 'linear-gradient(90deg, #FF69B4 0%, #1E90FF 100%)',
-                      mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                      maskComposite: 'exclude',
-                      opacity: 0,
-                      transition: 'opacity 0.3s',
-                    },
-                    '&:hover': { 
-                      transform: 'translateX(4px) scale(1.1)',
-                      boxShadow: '0 8px 32px rgba(255, 105, 180, 0.4)',
-                      background: 'linear-gradient(135deg, rgba(255, 105, 180, 0.2) 0%, rgba(30, 144, 255, 0.2) 100%)',
-                      '&::before': {
-                        opacity: 1,
-                      },
-                    },
-                  }}
-                >
-                  <ChevronRightIcon sx={{ fontSize: 28, color: 'rgba(255, 255, 255, 0.9)' }} />
-                </Box>
-              )}
-              
-              {/* Close button */}
-              <Box
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClose();
-                }}
-                sx={{
-                  position: 'absolute',
-                  top: 40,
-                  right: 40,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 48,
-                  height: 48,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, rgba(255, 61, 113, 0.1) 0%, rgba(255, 61, 113, 0.2) 100%)',
-                  backdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255, 61, 113, 0.3)',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                  '&::before': {
-                    content: '""',
-                    position: 'absolute',
-                    inset: -2,
-                    borderRadius: '50%',
-                    padding: 2,
-                    background: 'linear-gradient(90deg, #FF3D71 0%, #FF69B4 100%)',
-                    mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                    maskComposite: 'exclude',
-                    opacity: 0,
-                    transition: 'opacity 0.3s',
-                  },
-                  '&:hover': { 
-                    transform: 'scale(1.1) rotate(90deg)',
-                    boxShadow: '0 8px 32px rgba(255, 61, 113, 0.4)',
-                    background: 'linear-gradient(135deg, rgba(255, 61, 113, 0.2) 0%, rgba(255, 61, 113, 0.3) 100%)',
-                    '&::before': {
-                      opacity: 1,
-                    },
-                  },
-                }}
-              >
-                <CloseIcon sx={{ fontSize: 24, color: 'rgba(255, 255, 255, 0.9)' }} />
-              </Box>
-              
-              {/* Image counter */}
-              <Box
-                sx={{
-                  position: 'absolute',
-                  bottom: 40,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  display: 'flex',
-                  gap: 1,
-                  alignItems: 'center',
-                }}
-              >
-                {images.map((_, index) => (
-                  <Box
-                    key={index}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onNavigate(index);
-                    }}
-                    sx={{
-                      width: index === currentIndex ? 32 : 8,
-                      height: 8,
-                      borderRadius: 1,
-                      bgcolor: index === currentIndex 
-                        ? '#FF69B4' 
-                        : 'rgba(255, 255, 255, 0.3)',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                      '&:hover': {
-                        bgcolor: index === currentIndex 
-                          ? '#FF69B4' 
-                          : 'rgba(255, 255, 255, 0.5)',
-                      },
-                    }}
-                  />
-                ))}
-              </Box>
-              
-              {/* Additional info */}
-              <Box
-                sx={{
-                  position: 'absolute',
-                  top: 40,
-                  left: 40,
-                  color: 'white',
-                  bgcolor: 'rgba(30, 30, 47, 0.95)',
-                  backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: 2,
-                  px: 2,
-                  py: 1,
-                }}
-              >
-                <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                  {currentIndex + 1} из {images.length}
-                </Typography>
-              </Box>
-            </>
-          )}
-        </Box>
-      </Fade>
-    </Modal>
+              ))}
+            </DotsContainer>
+          </>
+        )}
+      </ImageContainer>
+    </StyledDialog>
   );
 };
 

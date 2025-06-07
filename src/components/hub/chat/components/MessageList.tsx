@@ -230,12 +230,22 @@ const MessageList: React.FC<MessageListProps> = ({
     }
   }, [messages, signMediaUrls, setSignedUrls, hasSignedUrl]);
 
-  // Used in JSX conditional rendering below
-  const emptyMessages = messages.length === 0 && tempMessages.size === 0;
+  // Memoize expensive computations
+  const emptyMessages = React.useMemo(() => 
+    messages.length === 0 && tempMessages.size === 0, 
+    [messages.length, tempMessages.size]
+  );
 
-  // This is used in the actual JSX returned below to determine
-  // whether to show an empty state message or loading indicators
-  const shouldShowEmptyState = emptyMessages && !isLoadingMore && !!activeChannel;
+  const shouldShowEmptyState = React.useMemo(() => 
+    emptyMessages && !isLoadingMore && !!activeChannel,
+    [emptyMessages, isLoadingMore, activeChannel]
+  );
+
+  // Memoize combined messages for performance
+  const allMessages = React.useMemo(() => 
+    [...sortedMessages, ...Array.from(tempMessages.values())],
+    [sortedMessages, tempMessages]
+  );
 
   // Add empty state JSX - will be rendered when shouldShowEmptyState is true
   const emptyStateMessage = shouldShowEmptyState && (
@@ -566,6 +576,7 @@ const MessageList: React.FC<MessageListProps> = ({
         flexDirection: 'column',
         gap: 1,
         position: 'relative',
+        willChange: 'scroll-position',
         '&::-webkit-scrollbar': {
           width: '8px',
         },
@@ -632,8 +643,7 @@ const MessageList: React.FC<MessageListProps> = ({
             let currentDateString: string | null = null;
             let processedDates = new Set<string>();
 
-            // Combine real and temporary messages
-            const allMessages = [...sortedMessages, ...Array.from(tempMessages.values())];
+            // Use pre-computed combined messages
 
             allMessages.forEach((msg) => {
               const messageDate = new Date(msg.created_at);

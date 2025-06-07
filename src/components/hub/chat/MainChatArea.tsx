@@ -1714,22 +1714,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       />
       <ChatHeader
         activeChannel={activeChannel}
-        searchMode={searchMode}
-        setSearchMode={setSearchMode}
-        searchQuery={searchQuery}
-        searchInputRef={searchInputRef}
-        searchResultsRef={searchResultsRef}
-        showSearchResults={showSearchResults}
-        setShowSearchResults={setShowSearchResults}
-        searchResults={searchResults}
-        isSearching={isSearching}
-        debouncedSearchQuery={debouncedSearchQuery}
-        handleSearchInputChange={handleSearchInputChange}
-        clearSearch={clearSearch}
         onSearchResultClick={handleSearchResultClick}
-        onLoadMore={loadMore}
-        hasMore={hasMore}
-        isLoadingMore={isLoadingMore}
         isLoadingMessages={isLoading || isFetching}
         isLoadingAround={isLoadingAround}
         paginationState={{

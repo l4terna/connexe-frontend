@@ -146,12 +146,15 @@ const SimpleMediaImage: React.FC<SimpleMediaImageProps> = ({
         <img
           src={signedUrl}
           alt={alt}
+          loading="lazy"
+          decoding="async"
           style={{
             width: '100%',
             height: '100%',
             objectFit: 'cover',
             borderRadius: 'inherit',
-            transition: 'opacity 0.3s ease'
+            transition: 'opacity 0.3s ease',
+            willChange: 'auto'
           }}
           onLoad={() => setIsLoading(false)}
           onError={() => {

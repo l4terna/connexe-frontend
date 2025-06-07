@@ -1,5 +1,5 @@
 // SearchBar.tsx - изолированная версия
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState, useRef } from 'react';
 import { Box, IconButton, Typography, Tooltip } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
@@ -33,42 +33,27 @@ interface SearchBarProps {
 const SearchBar: React.FC<SearchBarProps> = ({
   activeChannelId,
   onSearchResultClick,
-  // Optional props from parent
-  searchMode: passedSearchMode,
-  setSearchMode: passedSetSearchMode,
-  searchQuery: passedSearchQuery,
-  searchInputRef: passedSearchInputRef,
-  searchResultsRef: passedSearchResultsRef,
-  showSearchResults: passedShowSearchResults,
-  setShowSearchResults: passedSetShowSearchResults,
-  searchResults: passedSearchResults,
-  isSearching: passedIsSearching,
-  debouncedSearchQuery: passedDebouncedSearchQuery,
-  handleSearchInputChange: passedHandleSearchInputChange,
-  clearSearch: passedClearSearch,
-  loadMore: passedLoadMore,
-  hasMore: passedHasMore,
-  isLoadingMore: passedIsLoadingMore
+  // Optional props from parent - игнорируем их для изоляции
 }) => {
-  // Используем хук для изоляции логики поиска только если не переданы пропсы
+  // Полностью изолированная логика поиска - используем только внутренний хук
   const hookValues = useSearchBar({ activeChannelId });
   
-  // Use passed props if they exist, otherwise use hook values
-  const searchMode = passedSearchMode !== undefined ? passedSearchMode : hookValues.searchMode;
-  const setSearchMode = passedSetSearchMode || hookValues.setSearchMode;
-  const searchQuery = passedSearchQuery !== undefined ? passedSearchQuery : hookValues.searchQuery;
-  const searchResults = passedSearchResults || hookValues.searchResults;
-  const debouncedSearchQuery = passedDebouncedSearchQuery !== undefined ? passedDebouncedSearchQuery : hookValues.debouncedSearchQuery;
-  const isSearching = passedIsSearching !== undefined ? passedIsSearching : hookValues.isSearching;
-  const showSearchResults = passedShowSearchResults !== undefined ? passedShowSearchResults : hookValues.showSearchResults;
-  const setShowSearchResults = passedSetShowSearchResults || hookValues.setShowSearchResults;
-  const hasMore = passedHasMore !== undefined ? passedHasMore : hookValues.hasMore;
-  const isLoadingMore = passedIsLoadingMore !== undefined ? passedIsLoadingMore : hookValues.isLoadingMore;
-  const searchInputRef = passedSearchInputRef || hookValues.searchInputRef;
-  const searchResultsRef = passedSearchResultsRef || hookValues.searchResultsRef;
-  const handleSearchInputChange = passedHandleSearchInputChange || hookValues.handleSearchInputChange;
-  const clearSearch = passedClearSearch || hookValues.clearSearch;
-  const loadMore = passedLoadMore || hookValues.loadMore;
+  // Используем только внутренние значения хука для полной изоляции
+  const searchMode = hookValues.searchMode;
+  const setSearchMode = hookValues.setSearchMode;
+  const searchQuery = hookValues.searchQuery;
+  const searchResults = hookValues.searchResults;
+  const debouncedSearchQuery = hookValues.debouncedSearchQuery;
+  const isSearching = hookValues.isSearching;
+  const showSearchResults = hookValues.showSearchResults;
+  const setShowSearchResults = hookValues.setShowSearchResults;
+  const hasMore = hookValues.hasMore;
+  const isLoadingMore = hookValues.isLoadingMore;
+  const searchInputRef = hookValues.searchInputRef;
+  const searchResultsRef = hookValues.searchResultsRef;
+  const handleSearchInputChange = hookValues.handleSearchInputChange;
+  const clearSearch = hookValues.clearSearch;
+  const loadMore = hookValues.loadMore;
   const hookHandleResultClick = hookValues.handleResultClick;
   // Мемоизируем обработчик скролла
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {

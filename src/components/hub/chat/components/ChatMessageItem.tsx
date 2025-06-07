@@ -97,6 +97,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
   } = props;
 
   const [isHovered, setIsHovered] = useState(false);
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   
@@ -150,12 +151,20 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
         data-date={message.created_at}
         data-msg-id={message.id.toString()}
         onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
+          // Clear any pending hide timeout
+          if (hoverTimeoutRef.current) {
+            clearTimeout(hoverTimeoutRef.current);
+            hoverTimeoutRef.current = null;
+          }
           setIsHovered(true);
           if (onMouseEnter) onMouseEnter(e, message);
         }}
         onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
-          setIsHovered(false);
-          if (onMouseLeave) onMouseLeave(e);
+          // Debounce hover state changes
+          hoverTimeoutRef.current = setTimeout(() => {
+            setIsHovered(false);
+            if (onMouseLeave) onMouseLeave(e);
+          }, 100);
         }}
         sx={{
           display: 'flex',
@@ -166,6 +175,8 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
           overflow: 'visible',
           transition: 'background-color 0.2s ease',
           opacity: isTempMessage ? 0.6 : 1,
+          // contentVisibility: 'auto',
+          // containIntrinsicSize: '0 80px',
           mt: isFirstInGroup ? 3 : 0.5,
           px: 1.5,
           py: 0.5,

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Message } from '@/api/channels';
-import { useMessageSearch } from './useMessageSearch';
+import { useSearchMessagesQuery } from '@/api/channels';
 import debounce from 'lodash/debounce';
 
 interface UseSearchBarProps {
@@ -18,18 +18,29 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
   
-  // Используем существующий хук для выполнения запроса поиска
-  const { 
-    searchResults, 
-    isSearching, 
-    hasMore, 
-    isLoadingMore, 
-    loadMore, 
-    clearSearch: resetSearch 
-  } = useMessageSearch({
-    channelId: activeChannelId !== null ? activeChannelId : undefined,
-    onSearchResultClick: () => {} // Пустая функция, реальный обработчик будет передан через параметры
-  });
+  // Состояние для пагинации поиска
+  const [beforeId, setBeforeId] = useState<number | undefined>(undefined);
+  const [allResults, setAllResults] = useState<Message[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  
+  // API запрос для поиска сообщений
+  const queryParams = activeChannelId !== null && debouncedSearchQuery.trim() ? {
+    channelId: activeChannelId,
+    search: debouncedSearchQuery,
+    size: 20,
+    ...(beforeId ? { beforeId } : {})
+  } : undefined;
+
+  const {
+    data: searchResultsData,
+    isFetching: isSearching,
+    error: searchError
+  } = useSearchMessagesQuery(
+    queryParams,
+    {
+      skip: !activeChannelId || !debouncedSearchQuery.trim()
+    }
+  );
 
   // Debounce для запроса поиска
   const debouncedSetSearchQuery = useCallback(
@@ -39,6 +50,34 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
     []
   );
 
+  // Эффект для обработки результатов поиска
+  useEffect(() => {
+    if (searchResultsData) {
+      if (beforeId) {
+        // Пагинация - добавляем к существующим результатам
+        setAllResults(prev => [...prev, ...searchResultsData]);
+      } else {
+        // Новый поиск - заменяем результаты
+        setAllResults(searchResultsData);
+      }
+      
+      // Проверяем, есть ли еще результаты
+      setHasMore(searchResultsData.length >= 20);
+    }
+  }, [searchResultsData, beforeId]);
+
+  // Очистка результатов при изменении запроса
+  useEffect(() => {
+    if (!debouncedSearchQuery.trim()) {
+      setAllResults([]);
+      setBeforeId(undefined);
+      setHasMore(true);
+    } else {
+      // При новом запросе сбрасываем пагинацию
+      setBeforeId(undefined);
+    }
+  }, [debouncedSearchQuery]);
+
   // Обработка изменения значения поиска
   const handleSearchInputChange = useCallback((value: string) => {
     setSearchQuery(value);
@@ -47,23 +86,36 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
     // Если введен текст, показываем результаты
     if (value.trim()) {
       setShowSearchResults(true);
+    } else {
+      setShowSearchResults(false);
     }
   }, [debouncedSetSearchQuery]);
+
+  // Загрузка дополнительных результатов
+  const loadMore = useCallback(() => {
+    if (hasMore && allResults.length > 0 && !isSearching) {
+      const lastResult = allResults[allResults.length - 1];
+      setBeforeId(lastResult.id);
+    }
+  }, [hasMore, allResults, isSearching]);
+
+  // Состояние загрузки дополнительных результатов
+  const isLoadingMore = isSearching && beforeId !== undefined;
 
   // Очистка поиска
   const clearSearch = useCallback(() => {
     setSearchQuery('');
     setDebouncedSearchQuery('');
     setShowSearchResults(false);
-    resetSearch();
+    setSearchMode(false);
+    setAllResults([]);
+    setBeforeId(undefined);
+    setHasMore(true);
     
-    if (!searchMode) {
-      // Если мы уже вышли из режима поиска, очищаем input
-      if (searchInputRef.current) {
-        searchInputRef.current.value = '';
-      }
+    if (searchInputRef.current) {
+      searchInputRef.current.value = '';
     }
-  }, [searchMode, resetSearch]);
+  }, []);
   
   // Обработчик клика по результату поиска
   const handleResultClick = useCallback(
@@ -106,7 +158,7 @@ export const useSearchBar = ({ activeChannelId }: UseSearchBarProps) => {
     searchMode,
     setSearchMode,
     searchQuery,
-    searchResults,
+    searchResults: allResults,
     debouncedSearchQuery,
     isSearching,
     showSearchResults,

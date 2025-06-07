@@ -16,22 +16,6 @@ interface ChatHeaderProps {
     afterId: number | null;
     isJumpingToMessage: boolean;
   };
-  // Search related props
-  searchMode?: boolean;
-  setSearchMode?: (mode: boolean) => void;
-  searchQuery?: string;
-  searchInputRef?: React.RefObject<HTMLInputElement | null>;
-  searchResultsRef?: React.RefObject<HTMLDivElement | null>;
-  showSearchResults?: boolean;
-  setShowSearchResults?: (show: boolean) => void;
-  searchResults?: Message[];
-  isSearching?: boolean;
-  debouncedSearchQuery?: string;
-  handleSearchInputChange?: (value: string) => void;
-  clearSearch?: () => void;
-  onLoadMore?: () => void;
-  hasMore?: boolean;
-  isLoadingMore?: boolean;
 }
 
 /**
@@ -43,22 +27,6 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   isLoadingMessages = false,
   isLoadingAround = false,
   paginationState,
-  // Search related props
-  searchMode,
-  setSearchMode,
-  searchQuery,
-  searchInputRef,
-  searchResultsRef,
-  showSearchResults,
-  setShowSearchResults,
-  searchResults,
-  isSearching,
-  debouncedSearchQuery,
-  handleSearchInputChange,
-  clearSearch,
-  onLoadMore,
-  hasMore,
-  isLoadingMore,
 }) => {
   // Determine if we should show loading indicator
   const isLoading = isLoadingMessages || isLoadingAround || 
@@ -83,21 +51,6 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       <SearchBar
         activeChannelId={activeChannel?.id || null}
         onSearchResultClick={onSearchResultClick}
-        searchMode={searchMode}
-        setSearchMode={setSearchMode}
-        searchQuery={searchQuery}
-        searchInputRef={searchInputRef}
-        searchResultsRef={searchResultsRef}
-        showSearchResults={showSearchResults}
-        setShowSearchResults={setShowSearchResults}
-        searchResults={searchResults}
-        isSearching={isSearching}
-        debouncedSearchQuery={debouncedSearchQuery}
-        handleSearchInputChange={handleSearchInputChange}
-        clearSearch={clearSearch}
-        loadMore={onLoadMore}
-        hasMore={hasMore}
-        isLoadingMore={isLoadingMore}
       />
 
       {/* Loading indicator bar */}

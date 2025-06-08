@@ -15,6 +15,7 @@ interface UseMessageScrollProps {
     ) => void;
   };
   messagesPerPage?: number;
+  sendBulkReadAll?: () => void;
 }
 
 interface UseMessageScrollReturn {
@@ -41,7 +42,8 @@ export const useMessageScroll = ({
   onMarkAllAsRead,
   bulkReadAllRef,
   paginationActions,
-  messagesPerPage = 20
+  messagesPerPage = 20,
+  sendBulkReadAll
 }: UseMessageScrollProps): UseMessageScrollReturn => {
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -92,6 +94,11 @@ export const useMessageScroll = ({
       }
       setShowScrollButton(false);
       
+      // Send bulk-read-all when programmatically scrolling to bottom
+      if (sendBulkReadAll && activeChannel) {
+        sendBulkReadAll();
+      }
+      
       // Double-check scroll position after a short delay
       setTimeout(() => {
         if (container.scrollTop < container.scrollHeight - container.clientHeight - 100) {
@@ -99,7 +106,7 @@ export const useMessageScroll = ({
         }
       }, 100);
     });
-  }, [disableAutoScroll, disableSmoothScroll, messagesContainerRef]);
+  }, [disableAutoScroll, disableSmoothScroll, messagesContainerRef, sendBulkReadAll, activeChannel]);
 
   // Function to scroll to a specific message and highlight it
   const scrollToMessage = useCallback((messageId: number) => {

@@ -24,6 +24,7 @@ import { useMessageSearch } from './hooks/useMessageSearch';
 import { useMessageWebSocket } from './hooks/useMessageWebSocket';
 import { useMessageState } from './hooks/useMessageState';
 import { ExtendedMessage, MessageStatus } from './types/message';
+import { webSocketService } from '@/websocket/WebSocketService';
 
 // These utility functions have been moved to the MessageList component
 
@@ -87,6 +88,27 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Ref for bulk read all functionality
   const bulkReadAllRef = useRef<number>(0);
   
+  // Function to send bulk-read-all WebSocket message
+  const sendBulkReadAll = useCallback(() => {
+    if (!activeChannel) return;
+    
+    const now = Date.now();
+    // Debounce to prevent sending too frequently (1 second cooldown)
+    if (now - bulkReadAllRef.current > 1000) {
+      bulkReadAllRef.current = now;
+      
+      // Send bulk-read-all WebSocket message
+      webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
+      
+      // Also mark all messages as read in the UI
+      markAllMessagesAsRead();
+      markAllMessagesAsReadInState(user.id);
+      resetUnreadCounts();
+      
+      console.log('[MainChatArea] Sent bulk-read-all for channel:', activeChannel.id);
+    }
+  }, [activeChannel, markAllMessagesAsRead, markAllMessagesAsReadInState, user.id, resetUnreadCounts]);
+  
   // Refs должны быть объявлены до использования в хуках
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const scrollCorrectionRef = useRef<{
@@ -117,7 +139,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     onMarkAllAsRead: markAllMessagesAsRead,
     bulkReadAllRef,
     paginationActions,
-    messagesPerPage: 50
+    messagesPerPage: 50,
+    sendBulkReadAll
   });
   
   // Assign scroll correction functions to ref for pagination use
@@ -406,8 +429,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Mark all messages as read when entering a channel
     if (activeChannel) {
       markAllMessagesAsRead();
+      // Send bulk-read-all when entering a channel
+      sendBulkReadAll();
     }
-  }, [activeChannel?.id, markAllMessagesAsRead, resetMessageStates]); // Using id instead of the full object
+  }, [activeChannel?.id, markAllMessagesAsRead, resetMessageStates, sendBulkReadAll]); // Using id instead of the full object
 
   // scrollToBottom function is now provided by useMessageScroll hook
   
@@ -456,8 +481,11 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Прокручиваем вниз после загрузки (будет вызвано в эффекте)
       // handleScrollToBottom вызовется автоматически после загрузки initial сообщений
+      
+      // Also send bulk-read-all when jumping to bottom
+      sendBulkReadAll();
     }, 50);
-  }, [paginationActions, setMessages, setTempMessages, setUnreadMessages, resetUnreadCounts, setTargetMessageId, setLastAroundId, setLoadingWithTimeout]);
+  }, [paginationActions, setMessages, setTempMessages, setUnreadMessages, resetUnreadCounts, setTargetMessageId, setLastAroundId, setLoadingWithTimeout, sendBulkReadAll]);
 
   // Handle around messages
   useEffect(() => {

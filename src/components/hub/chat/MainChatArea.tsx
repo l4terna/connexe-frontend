@@ -89,6 +89,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const bulkReadAllRef = useRef<number>(0);
   const lastBulkReadChannelRef = useRef<number | null>(null);
   
+  // Refs for bulk-read functionality
+  const bulkReadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingBulkReadIdsRef = useRef<Set<number>>(new Set());
+  
   // Function to send bulk-read-all WebSocket message with cooldown
   const sendBulkReadAll = useCallback(() => {
     if (!activeChannel) return;
@@ -119,6 +123,76 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     
     console.log('[MainChatArea] Sent bulk-read-all for channel:', activeChannel.id);
   }, [activeChannel, markAllMessagesAsRead, markAllMessagesAsReadInState, user.id, resetUnreadCounts]);
+  
+  // Function to send bulk-read for specific message IDs
+  const sendBulkRead = useCallback(() => {
+    if (!activeChannel || pendingBulkReadIdsRef.current.size === 0) return;
+    
+    // Get the message IDs and clear the pending set
+    const messageIds = Array.from(pendingBulkReadIdsRef.current);
+    pendingBulkReadIdsRef.current.clear();
+    
+    // Send bulk-read WebSocket message
+    webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read`, {
+      message_ids: messageIds
+    });
+    
+    // Update messages status in UI
+    setMessages(prev => prev.map(msg => 
+      messageIds.includes(msg.id) ? { ...msg, status: MessageStatus.READ } : msg
+    ));
+    
+    // Remove from unread set
+    setUnreadMessages(prev => {
+      const newSet = new Set(prev);
+      messageIds.forEach(id => newSet.delete(id));
+      return newSet;
+    });
+    
+    // Update unread count
+    updateUnreadCount(-messageIds.length);
+    
+    console.log('[MainChatArea] Sent bulk-read for messages:', messageIds);
+  }, [activeChannel, setMessages, setUnreadMessages, updateUnreadCount]);
+  
+  // Function to collect unread messages in viewport with debouncing
+  const collectUnreadMessagesInViewport = useCallback(() => {
+    if (!messagesContainerRef.current || !activeChannel) return;
+    
+    const container = messagesContainerRef.current;
+    const containerRect = container.getBoundingClientRect();
+    
+    // Find all message elements in the viewport
+    const messageElements = container.querySelectorAll('[data-msg-id]');
+    
+    messageElements.forEach(element => {
+      const rect = element.getBoundingClientRect();
+      // Check if element is in viewport
+      if (rect.top < containerRect.bottom && rect.bottom > containerRect.top) {
+        const messageId = parseInt(element.getAttribute('data-msg-id') || '0', 10);
+        if (messageId) {
+          // Find the message and check if it's unread
+          const message = messages.find(m => m.id === messageId);
+          if (message && 
+              message.status === MessageStatus.NEW && 
+              message.author.id !== user.id) {
+            pendingBulkReadIdsRef.current.add(messageId);
+          }
+        }
+      }
+    });
+    
+    // Clear existing timer
+    if (bulkReadTimerRef.current) {
+      clearTimeout(bulkReadTimerRef.current);
+    }
+    
+    // Set new timer with 500ms debounce
+    bulkReadTimerRef.current = setTimeout(() => {
+      sendBulkRead();
+      bulkReadTimerRef.current = null;
+    }, 500);
+  }, [activeChannel, messages, user.id, sendBulkRead]);
   
   // Refs должны быть объявлены до использования в хуках
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -421,6 +495,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     lastBeforeIdRef.current = null;
     // Reset bulk read tracking when changing channels
     lastBulkReadChannelRef.current = null;
+    // Clear bulk-read pending messages and timer
+    pendingBulkReadIdsRef.current.clear();
+    if (bulkReadTimerRef.current) {
+      clearTimeout(bulkReadTimerRef.current);
+      bulkReadTimerRef.current = null;
+    }
     
     // Clear search state (navigation logic removed)
     
@@ -634,9 +714,12 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         paginationActions.setLoadingMode(null); // Сбрасываем режим после обработки
         paginationActions.setInitialLoadComplete(true); // Устанавливаем флаг завершения initial загрузки
         setLoadingWithTimeout(false); // Разблокируем пагинацию
+        
+        // Collect unread messages in viewport after initial load
+        collectUnreadMessagesInViewport();
       }, 100); // Небольшая задержка для гарантии завершения всех обновлений
     }
-  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationActions, lastAroundId, messages.length]);
+  }, [activeChannel, messagesData, isLoading, isFetching, convertToExtendedMessage, user.id, scrollToBottom, paginationState.loadingMode, paginationState.isJumpingToMessage, paginationActions, lastAroundId, messages.length, collectUnreadMessagesInViewport]);
 
   // Separate effect for handling pagination
   useEffect(() => {
@@ -1526,6 +1609,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         if (isAtBottom) {
           intentionalScrollUp = false;
         }
+        
+        // Collect unread messages in viewport when scrolling down
+        collectUnreadMessagesInViewport();
       }
       
       // Обновляем последнюю позицию скролла
@@ -1575,7 +1661,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
 
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [activeChannel, paginationState.enableAfterPagination, paginationState.hasMoreMessagesAfter, messages]);
+  }, [activeChannel, paginationState.enableAfterPagination, paginationState.hasMoreMessagesAfter, messages, collectUnreadMessagesInViewport]);
 
 
   // Debounced sending of unread messages is now handled by useMessageReadStatus hook
@@ -1589,6 +1675,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Очищаем таймеры
       if (highlightTimeoutRef.current) {
         clearTimeout(highlightTimeoutRef.current);
+      }
+      if (bulkReadTimerRef.current) {
+        clearTimeout(bulkReadTimerRef.current);
       }
     };
   }, []);

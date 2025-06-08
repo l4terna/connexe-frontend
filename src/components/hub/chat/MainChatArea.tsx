@@ -207,37 +207,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   } | null>(null);
   
   // Использование хука для работы со скроллом
-  const {
-    isScrolledToBottom,
-    setIsScrolledToBottom,
-    showScrollButton,
-    setShowScrollButton,
-    showDateLabel,
-    setShowDateLabel,
-    currentDateLabel,
-    setCurrentDateLabel,
-    setDisableAutoScroll,
-    scrollToBottom,
-    scrollToMessage,
-    prepareScrollCorrection,
-    setDisableSmoothScroll
-  } = useMessageScroll({
-    messagesContainerRef,
-    messages,
-    activeChannel,
-    user,
-    onMarkAllAsRead: markAllMessagesAsRead,
-    bulkReadAllRef,
-    paginationActions,
-    messagesPerPage: 50,
-    isUpdatingFromRequest
-  });
-  
-  // Assign scroll correction functions to ref for pagination use
-  scrollCorrectionRef.current = {
-    prepareScrollCorrection,
-    setDisableSmoothScroll
-  };
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -322,6 +291,108 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   // Храним ID последнего around запроса, чтобы не дублировать загрузку
   const [lastAroundId, setLastAroundId] = useState<number | null>(null);
   
+  
+  
+  const MESSAGES_PER_PAGE = 50;
+  
+  // Декларации функций объявлены заранее для React useCallback
+
+  
+  // Радикальное изменение: основной запрос только для initial загрузки и пагинации
+  const shouldRunMainQuery = (activeChannel?.type === ChannelType.TEXT || activeChannel?.type === ChannelType.PRIVATE) && 
+    !paginationState.skipMainQuery && 
+    (paginationState.loadingMode === 'initial' || 
+     paginationState.loadingMode === 'pagination' ||
+     (paginationState.loadingMode === null && (paginationState.beforeId !== null || paginationState.afterId !== null)));
+     
+     
+  const queryParams = shouldRunMainQuery ? {
+    channelId: activeChannel?.id ?? 0,
+    params: {
+      size: MESSAGES_PER_PAGE,
+      // При initial загрузке не передаем beforeId/afterId чтобы получить последние сообщения
+      ...(paginationState.loadingMode !== 'initial' && paginationState.beforeId ? { before: paginationState.beforeId } : {}),
+      ...(paginationState.loadingMode !== 'initial' && paginationState.afterId ? { after: paginationState.afterId } : {}),
+    }
+  } : { channelId: 0, params: {} };
+  
+  const { data: messagesData = [], isLoading, isFetching } = useGetMessagesQuery(
+    queryParams,
+    { 
+      skip: !shouldRunMainQuery,
+      refetchOnMountOrArgChange: true,
+      // Форсируем новый запрос при изменении
+      refetchOnReconnect: true,
+      // Не используем кешированные данные для пагинации
+      refetchOnFocus: false
+    }
+  );
+  
+  // Log query execution
+  React.useEffect(() => {
+    if (shouldRunMainQuery) {
+      console.log('[MainChatArea] Executing main query:', {
+        channelId: queryParams.channelId,
+        params: queryParams.params,
+        loadingMode: paginationState.loadingMode,
+        beforeId: paginationState.beforeId,
+        afterId: paginationState.afterId,
+        isLoading,
+        isFetching
+      });
+    }
+  }, [shouldRunMainQuery, queryParams, paginationState.loadingMode, paginationState.beforeId, paginationState.afterId, isLoading, isFetching]);
+  
+  // Отдельный хук для around запроса
+  const { data: aroundMessagesData, isLoading: isLoadingAround } = useGetMessagesQuery(
+    (activeChannel?.type === ChannelType.TEXT || activeChannel?.type === ChannelType.PRIVATE) && paginationState.aroundMessageId && paginationState.loadingMode === 'around' ? {
+      channelId: activeChannel?.id ?? 0,
+      params: {
+        size: MESSAGES_PER_PAGE,
+        around: paginationState.aroundMessageId
+      }
+    } : { channelId: 0, params: {} },
+    { 
+      skip: !activeChannel || (activeChannel.type !== ChannelType.TEXT && activeChannel.type !== ChannelType.PRIVATE) || !paginationState.aroundMessageId || paginationState.loadingMode !== 'around'
+    }
+  );
+  
+  // Now we can use isLoading and isFetching for useMessageScroll
+  const {
+    isScrolledToBottom,
+    setIsScrolledToBottom,
+    showScrollButton,
+    setShowScrollButton,
+    showDateLabel,
+    setShowDateLabel,
+    currentDateLabel,
+    setCurrentDateLabel,
+    setDisableAutoScroll,
+    scrollToBottom,
+    scrollToMessage,
+    prepareScrollCorrection,
+    setDisableSmoothScroll
+  } = useMessageScroll({
+    messagesContainerRef,
+    messages,
+    activeChannel,
+    user,
+    onMarkAllAsRead: markAllMessagesAsRead,
+    bulkReadAllRef,
+    paginationActions,
+    messagesPerPage: 50,
+    isUpdatingFromRequest,
+    onScrollToBottomComplete: sendBulkReadAll,
+    isLoadingMessages: isLoading || isFetching,
+    loadingMode: paginationState.loadingMode
+  });
+  
+  // Assign scroll correction functions to ref for pagination use
+  scrollCorrectionRef.current = {
+    prepareScrollCorrection,
+    setDisableSmoothScroll
+  };
+  
   // Использование хука WebSocket для обработки сообщений
   useMessageWebSocket(
     activeChannel,
@@ -405,71 +476,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       unreadMessagesBufferRef,
       addToReadBuffer,
       bulkReadAllRef
-    }
-  );
-  
-  
-  const MESSAGES_PER_PAGE = 50;
-  
-  // Декларации функций объявлены заранее для React useCallback
-
-  
-  // Радикальное изменение: основной запрос только для initial загрузки и пагинации
-  const shouldRunMainQuery = (activeChannel?.type === ChannelType.TEXT || activeChannel?.type === ChannelType.PRIVATE) && 
-    !paginationState.skipMainQuery && 
-    (paginationState.loadingMode === 'initial' || 
-     paginationState.loadingMode === 'pagination' ||
-     (paginationState.loadingMode === null && (paginationState.beforeId !== null || paginationState.afterId !== null)));
-     
-     
-  const queryParams = shouldRunMainQuery ? {
-    channelId: activeChannel?.id ?? 0,
-    params: {
-      size: MESSAGES_PER_PAGE,
-      // При initial загрузке не передаем beforeId/afterId чтобы получить последние сообщения
-      ...(paginationState.loadingMode !== 'initial' && paginationState.beforeId ? { before: paginationState.beforeId } : {}),
-      ...(paginationState.loadingMode !== 'initial' && paginationState.afterId ? { after: paginationState.afterId } : {}),
-    }
-  } : { channelId: 0, params: {} };
-  
-  const { data: messagesData = [], isLoading, isFetching } = useGetMessagesQuery(
-    queryParams,
-    { 
-      skip: !shouldRunMainQuery,
-      refetchOnMountOrArgChange: true,
-      // Форсируем новый запрос при изменении
-      refetchOnReconnect: true,
-      // Не используем кешированные данные для пагинации
-      refetchOnFocus: false
-    }
-  );
-  
-  // Log query execution
-  React.useEffect(() => {
-    if (shouldRunMainQuery) {
-      console.log('[MainChatArea] Executing main query:', {
-        channelId: queryParams.channelId,
-        params: queryParams.params,
-        loadingMode: paginationState.loadingMode,
-        beforeId: paginationState.beforeId,
-        afterId: paginationState.afterId,
-        isLoading,
-        isFetching
-      });
-    }
-  }, [shouldRunMainQuery, queryParams, paginationState.loadingMode, paginationState.beforeId, paginationState.afterId, isLoading, isFetching]);
-  
-  // Отдельный хук для around запроса
-  const { data: aroundMessagesData, isLoading: isLoadingAround } = useGetMessagesQuery(
-    (activeChannel?.type === ChannelType.TEXT || activeChannel?.type === ChannelType.PRIVATE) && paginationState.aroundMessageId && paginationState.loadingMode === 'around' ? {
-      channelId: activeChannel?.id ?? 0,
-      params: {
-        size: MESSAGES_PER_PAGE,
-        around: paginationState.aroundMessageId
-      }
-    } : { channelId: 0, params: {} },
-    { 
-      skip: !activeChannel || (activeChannel.type !== ChannelType.TEXT && activeChannel.type !== ChannelType.PRIVATE) || !paginationState.aroundMessageId || paginationState.loadingMode !== 'around'
     }
   );
   
@@ -578,11 +584,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Прокручиваем вниз после загрузки (будет вызвано в эффекте)
       // handleScrollToBottom вызовется автоматически после загрузки initial сообщений
-      
-      // Send bulk-read-all when user clicks scroll-to-bottom button
-      sendBulkReadAll();
+      // bulk-read-all будет вызван автоматически после завершения скроллинга через callback
     }, 50);
-  }, [paginationActions, setMessages, setTempMessages, setUnreadMessages, resetUnreadCounts, setTargetMessageId, setLastAroundId, setLoadingWithTimeout, sendBulkReadAll]);
+  }, [paginationActions, setMessages, setTempMessages, setUnreadMessages, resetUnreadCounts, setTargetMessageId, setLastAroundId, setLoadingWithTimeout]);
 
   // Handle around messages
   useEffect(() => {
@@ -721,7 +725,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // useLayoutEffect уже установил скролл, теперь только разблокируем пагинацию
       setTimeout(() => {
-        // Вызываем scrollToBottom для обновления состояний и маркировки сообщений как прочитанных
+        // Вызываем scrollToBottom для обновления состояний (bulk-read-all будет вызван через callback автоматически)
         scrollToBottom();
         paginationActions.setLoadingMode(null); // Сбрасываем режим после обработки
         paginationActions.setInitialLoadComplete(true); // Устанавливаем флаг завершения initial загрузки
@@ -1036,7 +1040,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   }, [activeChannel, createMessage, convertToExtendedMessage, setMessages]);
 
   // Хук для управления очередью сообщений
-  const { queueMessage, clearQueue } = useMessageQueue({
+  const { queueMessage } = useMessageQueue({
     onSendMessage: sendMessageToAPI,
     onAddTempMessage: addTempMessage,
     onRemoveTempMessage: removeTempMessage,

@@ -16,6 +16,9 @@ interface UseMessageScrollProps {
   };
   messagesPerPage?: number;
   isUpdatingFromRequest?: boolean;
+  onScrollToBottomComplete?: () => void;
+  isLoadingMessages?: boolean;
+  loadingMode?: string | null;
 }
 
 interface UseMessageScrollReturn {
@@ -43,7 +46,10 @@ export const useMessageScroll = ({
   bulkReadAllRef,
   paginationActions,
   messagesPerPage = 20,
-  isUpdatingFromRequest = false
+  isUpdatingFromRequest = false,
+  onScrollToBottomComplete,
+  isLoadingMessages = false,
+  loadingMode = null
 }: UseMessageScrollProps): UseMessageScrollReturn => {
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -58,6 +64,7 @@ export const useMessageScroll = ({
   const previousScrollTopRef = useRef<number>(0);
   const messagesCountRef = useRef<number>(0);
   const scrollThrottleRef = useRef<boolean>(false);
+  const pendingCallbackRef = useRef<boolean>(false);
 
   // Function to prepare for scroll correction
   const prepareScrollCorrection = useCallback(() => {
@@ -94,16 +101,25 @@ export const useMessageScroll = ({
       }
       setShowScrollButton(false);
       
-      // Don't send bulk-read-all here - it should only be sent when user clicks the button
-      
-      // Double-check scroll position after a short delay
+      // Double-check scroll position after a short delay and then call completion callback
       setTimeout(() => {
         if (container.scrollTop < container.scrollHeight - container.clientHeight - 100) {
           container.scrollTop = container.scrollHeight;
         }
+        
+        // Call completion callback after scroll is complete, but only if not loading messages
+        if (onScrollToBottomComplete) {
+          if (isLoadingMessages && loadingMode === 'initial') {
+            // If we're loading initial messages, wait for them to complete
+            pendingCallbackRef.current = true;
+          } else {
+            // If not loading, call immediately
+            onScrollToBottomComplete();
+          }
+        }
       }, 100);
     });
-  }, [disableAutoScroll, disableSmoothScroll, messagesContainerRef]);
+  }, [disableAutoScroll, disableSmoothScroll, messagesContainerRef, onScrollToBottomComplete, isLoadingMessages, loadingMode]);
 
   // Function to scroll to a specific message and highlight it
   const scrollToMessage = useCallback((messageId: number) => {
@@ -333,6 +349,21 @@ export const useMessageScroll = ({
     previousScrollHeightRef.current = container.scrollHeight;
     previousScrollTopRef.current = container.scrollTop;
   }, [messages.length, messagesContainerRef, isUpdatingFromRequest]);
+
+  // Effect to handle pending callback after loading completes
+  useEffect(() => {
+    // If we have a pending callback and loading has finished, call it
+    if (pendingCallbackRef.current && !isLoadingMessages && loadingMode === null && onScrollToBottomComplete) {
+      pendingCallbackRef.current = false;
+      
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        if (onScrollToBottomComplete) {
+          onScrollToBottomComplete();
+        }
+      }, 100);
+    }
+  }, [isLoadingMessages, loadingMode, onScrollToBottomComplete]);
 
   // Cleanup on unmount
   useEffect(() => {

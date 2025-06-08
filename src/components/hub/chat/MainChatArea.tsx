@@ -89,47 +89,35 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const bulkReadAllRef = useRef<number>(0);
   const lastBulkReadChannelRef = useRef<number | null>(null);
   
-  // Debounce timer ref for bulk-read-all
-  const bulkReadAllTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Function to send bulk-read-all WebSocket message with debouncing
+  // Function to send bulk-read-all WebSocket message with cooldown
   const sendBulkReadAll = useCallback(() => {
     if (!activeChannel) return;
     
-    // Clear any existing timer
-    if (bulkReadAllTimerRef.current) {
-      clearTimeout(bulkReadAllTimerRef.current);
+    const now = Date.now();
+    const timeSinceLastCall = now - bulkReadAllRef.current;
+    
+    // Check if we're still in cooldown period (1 second)
+    if (timeSinceLastCall < 1000) {
+      console.log('[MainChatArea] Skipping bulk-read-all - cooldown active', {
+        timeSinceLastCall,
+        cooldownRemaining: 1000 - timeSinceLastCall,
+        channelId: activeChannel.id
+      });
+      return; // Just ignore the request completely
     }
     
-    // Set a new timer with 500ms debounce
-    bulkReadAllTimerRef.current = setTimeout(() => {
-      const now = Date.now();
-      // Check if we've already sent bulk-read-all for this channel recently (within 3 seconds)
-      const timeSinceLastCall = now - bulkReadAllRef.current;
-      const cooldownExpired = timeSinceLastCall > 3000;
-      
-      if (cooldownExpired) {
-        bulkReadAllRef.current = now;
-        
-        // Send bulk-read-all WebSocket message
-        webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
-        
-        // Also mark all messages as read in the UI
-        markAllMessagesAsRead();
-        markAllMessagesAsReadInState(user.id);
-        resetUnreadCounts();
-        
-        console.log('[MainChatArea] Sent bulk-read-all for channel:', activeChannel.id);
-      } else {
-        console.log('[MainChatArea] Skipping bulk-read-all - cooldown active', {
-          timeSinceLastCall,
-          cooldownRemaining: 3000 - timeSinceLastCall,
-          channelId: activeChannel.id
-        });
-      }
-      
-      bulkReadAllTimerRef.current = null;
-    }, 500); // 500ms debounce delay
+    // Cooldown has passed, send the request
+    bulkReadAllRef.current = now;
+    
+    // Send bulk-read-all WebSocket message
+    webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
+    
+    // Also mark all messages as read in the UI
+    markAllMessagesAsRead();
+    markAllMessagesAsReadInState(user.id);
+    resetUnreadCounts();
+    
+    console.log('[MainChatArea] Sent bulk-read-all for channel:', activeChannel.id);
   }, [activeChannel, markAllMessagesAsRead, markAllMessagesAsReadInState, user.id, resetUnreadCounts]);
   
   // Refs должны быть объявлены до использования в хуках
@@ -433,11 +421,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     lastBeforeIdRef.current = null;
     // Reset bulk read tracking when changing channels
     lastBulkReadChannelRef.current = null;
-    // Clear any pending bulk-read-all timer
-    if (bulkReadAllTimerRef.current) {
-      clearTimeout(bulkReadAllTimerRef.current);
-      bulkReadAllTimerRef.current = null;
-    }
     
     // Clear search state (navigation logic removed)
     
@@ -1606,9 +1589,6 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       // Очищаем таймеры
       if (highlightTimeoutRef.current) {
         clearTimeout(highlightTimeoutRef.current);
-      }
-      if (bulkReadAllTimerRef.current) {
-        clearTimeout(bulkReadAllTimerRef.current);
       }
     };
   }, []);

@@ -617,9 +617,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     />
                   </Form>
                   <Stack direction="row" spacing={1}>
-                    <IconButton size="small" sx={{ color: '#FF69B4' }}>
-                      <EmojiEmotionsIcon />
-                    </IconButton>
                     <Tooltip title={selectedImages.length >= MAX_IMAGES ? `Максимум ${MAX_IMAGES} изображений` : 'Прикрепить изображения'}>
                       <Box>  {/* Wrapper to make tooltip work with disabled button */}
                         <IconButton 

@@ -193,18 +193,19 @@ export const channelsApi = api.injectEndpoints({
       }, 
   
     }),
-    searchMessages: builder.query<Message[], { channelId: number; search: string; size?: number; beforeId?: number }>({
-      query: ({ channelId, search, size = 20, beforeId }) => ({
+    searchMessages: builder.query<Message[], { channelId: number; search: string; size?: number; beforeId?: number; page?: number }>({
+      query: ({ channelId, search, size = 20, beforeId, page }) => ({
         url: `/api/v1/channels/${channelId}/messages`,
         params: { 
           search, 
           size,
-          ...(beforeId && { before_id: beforeId })
+          ...(beforeId && { before_id: beforeId }),
+          ...(page !== undefined && { page })
         }
       }),
       keepUnusedDataFor: 5, // Кэшировать результаты поиска только 5 секунд
       providesTags: (result, error, arg) => [
-        { type: 'SearchResults', id: `${arg.channelId}-${arg.search}-${arg.beforeId || 'initial'}` }
+        { type: 'SearchResults', id: `${arg.channelId}-${arg.search}-${arg.beforeId || arg.page || 'initial'}` }
       ],
     }),
     createMessage: builder.mutation<Message, { channelId: number; content: string; attachments?: File[]; replyId?: number }>({

@@ -5,7 +5,6 @@ interface UseMessageScrollProps {
   messages: any[];
   activeChannel: { id: number } | null;
   user: { id: number } | null;
-  onScrollToBottom?: () => void;
   onMarkAllAsRead?: () => void;
   bulkReadAllRef?: React.RefObject<number>;
   paginationActions?: {
@@ -31,7 +30,6 @@ interface UseMessageScrollReturn {
   setDisableAutoScroll: (value: boolean) => void;
   scrollToBottom: (instant?: boolean) => void;
   scrollToMessage: (messageId: number) => void;
-  handleScrollToBottom: () => void;
   prepareScrollCorrection: () => void;
   setDisableSmoothScroll: (value: boolean) => void;
 }
@@ -40,7 +38,6 @@ export const useMessageScroll = ({
   messagesContainerRef,
   messages,
   activeChannel,
-  onScrollToBottom,
   onMarkAllAsRead,
   bulkReadAllRef,
   paginationActions,
@@ -95,7 +92,7 @@ export const useMessageScroll = ({
       }
       setShowScrollButton(false);
       
-      // Double-check after a short delay
+      // Double-check scroll position after a short delay
       setTimeout(() => {
         if (container.scrollTop < container.scrollHeight - container.clientHeight - 100) {
           container.scrollTop = container.scrollHeight;
@@ -149,16 +146,6 @@ export const useMessageScroll = ({
       }
     }, 2000);
   }, [messagesContainerRef, scrollToBottom]);
-
-  // Function to handle scroll to bottom with mark as read
-  const handleScrollToBottom = useCallback(() => {
-    scrollToBottom();
-    
-    // Mark all as read when scrolling to bottom
-    if (onMarkAllAsRead && activeChannel) {
-      onMarkAllAsRead();
-    }
-  }, [activeChannel, onMarkAllAsRead, scrollToBottom]);
 
   // Helper function to format date for group
   const formatDateForGroup = (timestamp: string) => {
@@ -258,23 +245,26 @@ export const useMessageScroll = ({
         
         // Check for visible date labels
         const visibleElements = container.querySelectorAll('.message-item');
-        if (!visibleElements.length) return;
         
         let visibleDate: string | null = null;
         
-        // Process visible elements to find date
-        visibleElements.forEach(element => {
-          const rect = element.getBoundingClientRect();
-          const containerRect = container.getBoundingClientRect();
-          const isVisible = rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
-          
-          if (isVisible && !visibleDate) {
-            const dateAttr = element.getAttribute('data-date');
-            if (dateAttr) {
-              visibleDate = formatDateForGroup(dateAttr);
+        if (visibleElements.length > 0) {
+          // Process visible elements to find date - use for...of with break for better performance
+          for (const element of visibleElements) {
+            const rect = element.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            // Check if element is at least partially visible
+            const isVisible = rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+            
+            if (isVisible) {
+              const dateAttr = element.getAttribute('data-date');
+              if (dateAttr) {
+                visibleDate = formatDateForGroup(dateAttr);
+                break; // Take the first visible element's date
+              }
             }
           }
-        });
+        }
 
         if (visibleDate) {
           setCurrentDateLabel(visibleDate);
@@ -284,6 +274,9 @@ export const useMessageScroll = ({
           dateLabelTimeoutRef.current = setTimeout(() => {
             setShowDateLabel(false);
           }, 1000);
+        } else {
+          // If no visible date found, hide the label immediately
+          setShowDateLabel(false);
         }
         
         // Set a timeout to determine when scrolling has stopped
@@ -333,13 +326,6 @@ export const useMessageScroll = ({
     previousScrollTopRef.current = container.scrollTop;
   }, [messages.length, messagesContainerRef]);
 
-  // Effect to handle scroll to bottom
-  useEffect(() => {
-    if (isScrolledToBottom && onScrollToBottom) {
-      onScrollToBottom();
-    }
-  }, [isScrolledToBottom, onScrollToBottom]);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -365,7 +351,6 @@ export const useMessageScroll = ({
     setDisableAutoScroll,
     scrollToBottom,
     scrollToMessage,
-    handleScrollToBottom,
     prepareScrollCorrection,
     setDisableSmoothScroll
   };

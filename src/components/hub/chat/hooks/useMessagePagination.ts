@@ -34,6 +34,7 @@ export interface MessagePaginationActions {
   jumpToMessage: (messageId: number) => void;
   setInitialLoadComplete: (complete: boolean) => void;
   clearAfterPaginationCooldown: () => void;
+  updateLastRequestMessageCount: (count: number, direction: 'before' | 'after' | 'initial') => void;
 }
 
 export interface UseMessagePaginationReturn {
@@ -64,6 +65,10 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const initialLoadCompleteRef = useRef(false);
   const afterPaginationCooldownRef = useRef(false);
+  
+  // Track message counts from previous requests to prevent unnecessary pagination
+  const lastRequestMessageCountRef = useRef<number | null>(null);
+  const lastAfterRequestMessageCountRef = useRef<number | null>(null);
 
   // Helper function to set loading state with safety timeout
   const setLoadingWithTimeout = useCallback((loading: boolean) => {
@@ -103,6 +108,16 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
       // Trigger pagination when scrolled to 20% from top - load older messages
       const scrollPercentageFromTop = container.scrollTop / container.scrollHeight;
       if (scrollPercentageFromTop < 0.2 && hasMoreMessages) {
+        // Check if previous request returned fewer messages than MESSAGES_PER_PAGE
+        if (lastRequestMessageCountRef.current !== null && 
+            lastRequestMessageCountRef.current < messagesPerPage) {
+          console.log('[useMessagePagination] Skipping before pagination - previous request returned fewer messages than page size:', {
+            lastMessageCount: lastRequestMessageCountRef.current,
+            messagesPerPage
+          });
+          return;
+        }
+        
         // Set loading state
         setLoadingWithTimeout(true);
         setLoadingMode('pagination');
@@ -114,6 +129,11 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
         const oldestMessage = sortedMsgs[0]; // Первое сообщение в отсортированном массиве
         
         if (oldestMessage && lastBeforeIdRef.current !== oldestMessage.id) {
+          console.log('[useMessagePagination] Setting beforeId for pagination:', {
+            oldestMessageId: oldestMessage.id,
+            previousBeforeId: lastBeforeIdRef.current,
+            messagesCount: messages.length
+          });
           setBeforeId(oldestMessage.id);
           lastBeforeIdRef.current = oldestMessage.id;
           // Очищаем afterId чтобы избежать конфликтов
@@ -122,6 +142,10 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
           // Сбрасываем skipMainQuery чтобы запрос мог отправиться
           setSkipMainQuery(false);
         } else if (oldestMessage) {
+          console.log('[useMessagePagination] Duplicate before request detected, skipping:', {
+            oldestMessageId: oldestMessage.id,
+            lastBeforeId: lastBeforeIdRef.current
+          });
           // Если это дубликат запроса, сбрасываем состояние загрузки
           setLoadingWithTimeout(false);
           setLoadingMode(null);
@@ -133,6 +157,16 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
           !afterPaginationCooldownRef.current && 
           hasMoreMessagesAfter && 
           messages.length >= messagesPerPage) {
+        
+        // Check if previous after request returned fewer messages than MESSAGES_PER_PAGE
+        if (lastAfterRequestMessageCountRef.current !== null && 
+            lastAfterRequestMessageCountRef.current < messagesPerPage) {
+          console.log('[useMessagePagination] Skipping after pagination - previous request returned fewer messages than page size:', {
+            lastAfterMessageCount: lastAfterRequestMessageCountRef.current,
+            messagesPerPage
+          });
+          return;
+        }
         
         const scrolledToBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
         
@@ -188,6 +222,9 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     lastAfterIdRef.current = null;
     initialLoadCompleteRef.current = false; // Reset initial load flag
     afterPaginationCooldownRef.current = false; // Reset cooldown flag
+    // Reset message count tracking
+    lastRequestMessageCountRef.current = null;
+    lastAfterRequestMessageCountRef.current = null;
   }, [setLoadingWithTimeout]);
 
   const jumpToMessage = useCallback((messageId: number) => {
@@ -209,6 +246,25 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
   
   const clearAfterPaginationCooldown = useCallback(() => {
     afterPaginationCooldownRef.current = false;
+  }, []);
+  
+  const updateLastRequestMessageCount = useCallback((count: number, direction: 'before' | 'after' | 'initial') => {
+    if (direction === 'before') {
+      lastRequestMessageCountRef.current = count;
+    } else if (direction === 'after') {
+      lastAfterRequestMessageCountRef.current = count;
+    } else if (direction === 'initial') {
+      // For initial load, track both directions
+      lastRequestMessageCountRef.current = count;
+      lastAfterRequestMessageCountRef.current = count;
+    }
+    
+    console.log('[useMessagePagination] Updated message count tracking:', {
+      direction,
+      count,
+      beforeCount: lastRequestMessageCountRef.current,
+      afterCount: lastAfterRequestMessageCountRef.current
+    });
   }, []);
 
   // Cleanup timeout on unmount
@@ -257,12 +313,14 @@ export const useMessagePagination = (): UseMessagePaginationReturn => {
     jumpToMessage,
     setInitialLoadComplete,
     clearAfterPaginationCooldown,
+    updateLastRequestMessageCount,
   }), [
     handleScrollPagination,
     resetPagination,
     jumpToMessage,
     setInitialLoadComplete,
-    clearAfterPaginationCooldown
+    clearAfterPaginationCooldown,
+    updateLastRequestMessageCount
   ]);
 
   return {

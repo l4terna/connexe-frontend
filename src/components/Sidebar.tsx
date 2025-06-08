@@ -125,7 +125,10 @@ const Sidebar = () => {
     if (Array.isArray(privateChannelsData)) {
       return privateChannelsData;
     }
-    console.warn('privateChannels is not an array:', privateChannelsData);
+    // If data is undefined (query skipped) or not an array, return empty array
+    if (privateChannelsData !== undefined) {
+      console.warn('privateChannels is not an array:', privateChannelsData);
+    }
     return [];
   }, [privateChannelsData]);
 

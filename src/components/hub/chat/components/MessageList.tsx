@@ -10,29 +10,37 @@ import SendIcon from '@mui/icons-material/Send';
 import CloseIcon from '@mui/icons-material/Close';
 import { ExtendedMessage } from '../types/message';
 import { LoadingMode } from '../hooks/useMessagePagination';
-import { useSignedUrls } from '../../../../context/SignedUrlContext';
+import { useSignMediaUrlsMutation } from '../../../../api/media';
+import { useMedia } from '../../../../context/MediaContext';
 
 // Validation schema for editing messages
 const messageSchema = Yup.object().shape({
   content: Yup.string()
-    .min(1, 'Message cannot be empty')
-    .max(2000, 'Message is too long')
+  .min(1, 'Message cannot be empty')
+  .max(2000, 'Message is too long')
 });
 
-// Helper functions
+// Helper functions with caching
+const dateFormatCache = new Map<string, string>();
+
 const formatDateForGroup = (timestamp: string) => {
+  const dateString = timestamp.split('T')[0]; // Use date part as cache key
+  
+  if (dateFormatCache.has(dateString)) {
+  return dateFormatCache.get(dateString)!;
+  }
+  
   const date = new Date(timestamp);
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
+  let result: string;
   if (date.toDateString() === today.toDateString()) {
-    return 'Сегодня';
-  }
-  if (date.toDateString() === yesterday.toDateString()) {
-    return 'Вчера';
-  }
-  
+  result = 'Сегодня';
+  } else if (date.toDateString() === yesterday.toDateString()) {
+  result = 'Вчера';
+  } else {
   const isCurrentYear = date.getFullYear() === today.getFullYear();
   const formattedDate = date.toLocaleDateString([], {
     weekday: 'long',
@@ -40,7 +48,11 @@ const formatDateForGroup = (timestamp: string) => {
     month: 'long',
     ...(isCurrentYear ? {} : { year: 'numeric' })
   });
-  return formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+  result = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+  }
+  
+  dateFormatCache.set(dateString, result);
+  return result;
 };
 
 const isWithinTimeThreshold = (timestamp1: string, timestamp2: string, thresholdMinutes: number = 30) => {
@@ -48,6 +60,12 @@ const isWithinTimeThreshold = (timestamp1: string, timestamp2: string, threshold
   const date2 = new Date(timestamp2);
   const diffInMinutes = Math.abs(date1.getTime() - date2.getTime()) / (1000 * 60);
   return diffInMinutes <= thresholdMinutes;
+};
+
+const isSameDay = (timestamp1: string, timestamp2: string) => {
+  const date1 = new Date(timestamp1);
+  const date2 = new Date(timestamp2);
+  return date1.toDateString() === date2.toDateString();
 };
 
 interface MessageListProps {
@@ -65,15 +83,15 @@ interface MessageListProps {
   user: { id: number; login: string; avatar: string | null };
   hubId?: number;
   paginationState: {
-    loadingMode: LoadingMode;
-    isJumpingToMessage: boolean;
-    beforeId: number | null;
-    afterId: number | null;
-    hasMoreMessages: boolean;
-    hasMoreMessagesAfter: boolean;
-    enableAfterPagination: boolean;
-    aroundMessageId: number | null;
-    skipMainQuery: boolean;
+  loadingMode: LoadingMode;
+  isJumpingToMessage: boolean;
+  beforeId: number | null;
+  afterId: number | null;
+  hasMoreMessages: boolean;
+  hasMoreMessagesAfter: boolean;
+  enableAfterPagination: boolean;
+  aroundMessageId: number | null;
+  skipMainQuery: boolean;
   };
   messagesPerPage: number;
   showDateLabel: boolean;
@@ -88,8 +106,8 @@ interface MessageListProps {
   hoverTimeoutRef?: React.MutableRefObject<NodeJS.Timeout | null>;
   isHoveringPortal?: React.MutableRefObject<boolean>;
   scrollCorrectionRef?: React.RefObject<{
-    prepareScrollCorrection: () => void;
-    setDisableSmoothScroll: (value: boolean) => void;
+  prepareScrollCorrection: () => void;
+  setDisableSmoothScroll: (value: boolean) => void;
   } | null>;
   forceScrollToMessageId?: number | null;
 
@@ -101,20 +119,20 @@ interface MessageListProps {
   setTempMessages: React.Dispatch<React.SetStateAction<Map<string, ExtendedMessage>>>;
   setReplyingToMessage: React.Dispatch<React.SetStateAction<ExtendedMessage | null>>;
   setHoveredMessage?: React.Dispatch<React.SetStateAction<{
-    element: HTMLElement;
-    message: ExtendedMessage;
+  element: HTMLElement;
+  message: ExtendedMessage;
   } | null>>;
   setTargetMessageId: React.Dispatch<React.SetStateAction<number | null>>;
   paginationActions: {
-    setIsJumpingToMessage: (value: boolean) => void;
-    setSkipMainQuery: (value: boolean) => void;
-    setBeforeId: (value: number | null) => void;
-    setAfterId: (value: number | null) => void;
-    setAroundMessageId: (value: number | null) => void;
-    setLoadingMode: (value: LoadingMode) => void;
-    setHasMoreMessages: (value: boolean) => void;
-    setHasMoreMessagesAfter: (value: boolean) => void;
-    setEnableAfterPagination: (value: boolean) => void;
+  setIsJumpingToMessage: (value: boolean) => void;
+  setSkipMainQuery: (value: boolean) => void;
+  setBeforeId: (value: number | null) => void;
+  setAfterId: (value: number | null) => void;
+  setAroundMessageId: (value: number | null) => void;
+  setLoadingMode: (value: LoadingMode) => void;
+  setHasMoreMessages: (value: boolean) => void;
+  setHasMoreMessagesAfter: (value: boolean) => void;
+  setEnableAfterPagination: (value: boolean) => void;
   };
   
   // Handler functions
@@ -161,83 +179,85 @@ const MessageList: React.FC<MessageListProps> = ({
   handleEditMessage,
   handleDeleteMessage
 }) => {
-  const { signedUrls, fetchSignedUrls } = useSignedUrls();
-  const pendingRequestRef = React.useRef<Promise<void> | null>(null);
+  const [signMediaUrls] = useSignMediaUrlsMutation();
+  const { setSignedUrls, hasSignedUrl } = useMedia();
+  
+  // Cache for tracking signing progress to prevent duplicate requests
+  const signingInProgress = React.useRef(new Set<string>());
+  
+  // Sort messages by creation time - memoized for performance
+  const sortedMessages = React.useMemo(() => {
+  return [...messages].sort((a, b) => {
+    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  });
+  }, [messages]);
 
-  // Process attachments and fetch signed URLs
-  const processMessageAttachments = React.useCallback(async (newMessages: ExtendedMessage[]) => {
-    console.log('🔍 processMessageAttachments called with', newMessages.length, 'messages');
-    if (!newMessages.length) return;
+  // Effect to collect attachments and sign media URLs after messages are loaded
+  React.useEffect(() => {
+    if (!messages.length) return;
 
-    const allAttachmentKeys: string[] = [];
+    // Collect unique storage keys from all messages with attachments
+    const storageKeys = new Set<string>();
     
-    // Collect all attachment keys from messages
-    newMessages.forEach(message => {
+    messages.forEach(message => {
       if (message.attachments && message.attachments.length > 0) {
-        console.log(`📎 Message ${message.id} has ${message.attachments.length} attachments:`, message.attachments);
-        allAttachmentKeys.push(...message.attachments);
+        message.attachments.forEach(attachment => {
+          if (attachment.trim()) { // Only add non-empty strings
+            storageKeys.add(attachment);
+          }
+        });
       }
     });
 
-    console.log('📋 Total attachment keys collected:', allAttachmentKeys.length, allAttachmentKeys);
-    if (allAttachmentKeys.length === 0) {
-      console.log('❌ No attachments found in messages');
-      return;
+    // Filter out already signed or currently signing URLs
+    const unsignedKeys = Array.from(storageKeys).filter(key => 
+      !hasSignedUrl(key) && !signingInProgress.current.has(key)
+    );
+
+    // If there are new storage keys to sign, make the API call
+    if (unsignedKeys.length > 0) {
+      // Mark these keys as currently being signed
+      unsignedKeys.forEach(key => signingInProgress.current.add(key));
+      
+      signMediaUrls({ storage_keys: unsignedKeys })
+        .unwrap()
+        .then(response => {
+          console.log('Media URLs signed:', response);
+          // Store the signed URLs in context
+          setSignedUrls(response);
+          // Remove from signing progress
+          unsignedKeys.forEach(key => signingInProgress.current.delete(key));
+        })
+        .catch(error => {
+          console.error('Failed to sign media URLs:', error);
+          // Remove from signing progress on error
+          unsignedKeys.forEach(key => signingInProgress.current.delete(key));
+        });
     }
+  }, [messages, signMediaUrls, setSignedUrls, hasSignedUrl]);
 
-    // Filter out URLs that already exist in memory
-    const missingKeys = allAttachmentKeys.filter(key => !signedUrls.has(key));
-    console.log('🔍 Missing keys that need to be fetched:', missingKeys.length, missingKeys);
-    console.log('📦 Current signedUrls size:', signedUrls.size);
+  // Memoize expensive computations
+  const emptyMessages = React.useMemo(() => 
+    messages.length === 0 && tempMessages.size === 0, 
+    [messages.length, tempMessages.size]
+  );
 
-    if (missingKeys.length > 0) {
-      // Prevent duplicate requests
-      if (pendingRequestRef.current) {
-        console.log('⏳ Request already pending, waiting...');
-        await pendingRequestRef.current;
-        return;
-      }
+  const shouldShowEmptyState = React.useMemo(() => 
+    emptyMessages && 
+    !isLoadingMore && 
+    !isLoadingAround &&
+    paginationState.loadingMode !== 'initial' &&
+    paginationState.loadingMode !== 'around' &&
+    !paginationState.isJumpingToMessage &&
+    !!activeChannel,
+    [emptyMessages, isLoadingMore, isLoadingAround, paginationState.loadingMode, paginationState.isJumpingToMessage, activeChannel]
+  );
 
-      // Create and store the request promise
-      const requestPromise = (async () => {
-        try {
-          console.log('🚀 Calling fetchSignedUrls with keys:', missingKeys);
-          await fetchSignedUrls(missingKeys);
-          console.log('✅ fetchSignedUrls completed successfully');
-        } catch (error) {
-          console.error('❌ Failed to fetch signed URLs:', error);
-        } finally {
-          pendingRequestRef.current = null;
-        }
-      })();
-
-      pendingRequestRef.current = requestPromise;
-      await requestPromise;
-    } else {
-      console.log('✅ All attachment URLs already in cache');
-    }
-  }, [fetchSignedUrls, signedUrls]);
-
-  // Process attachments when messages change
-  React.useEffect(() => {
-    console.log('📬 MessageList effect: messages changed, count:', messages.length);
-    if (messages.length > 0) {
-      console.log('📬 Sample message structure:', messages[0]);
-      processMessageAttachments(messages);
-    }
-  }, [messages, processMessageAttachments]);
-
-  // Sort messages by creation time
-  const sortedMessages = [...messages].sort((a, b) => {
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-  });
-
-  // Used in JSX conditional rendering below
-  const emptyMessages = messages.length === 0 && tempMessages.size === 0;
-
-  // This is used in the actual JSX returned below to determine
-  // whether to show an empty state message or loading indicators
-  const shouldShowEmptyState = emptyMessages && !isLoadingMore && !!activeChannel;
+  // Memoize combined messages for performance
+  const allMessages = React.useMemo(() => 
+    [...sortedMessages, ...Array.from(tempMessages.values())],
+    [sortedMessages, tempMessages]
+  );
 
   // Add empty state JSX - will be rendered when shouldShowEmptyState is true
   const emptyStateMessage = shouldShowEmptyState && (
@@ -248,8 +268,8 @@ const MessageList: React.FC<MessageListProps> = ({
     </Box>
   );
 
-  // Handle reply click function
-  const handleReplyClick = (replyId: number) => {
+  // Handle reply click function - moved outside component to prevent hook order issues
+  const handleReplyClick = React.useCallback((replyId: number) => {
     // Check if message exists in current list
     const messageExists = sortedMessages.some(msg => msg.id === replyId);
 
@@ -312,7 +332,44 @@ const MessageList: React.FC<MessageListProps> = ({
 
       // После загрузки around эффект автоматически прокрутит к сообщению
     }
-  };
+  }, [sortedMessages, setFocusedMessageId, setHighlightedMessages, highlightTimeoutRef, paginationActions, setMessages, setTempMessages, setTargetMessageId]);
+
+  // Create stable callbacks for event handlers to prevent re-renders
+  const onReplyCallback = React.useCallback((message: ExtendedMessage) => {
+    setReplyingToMessage(message);
+  }, [setReplyingToMessage]);
+
+  const onEditCallback = React.useCallback((messageId: ExtendedMessage | number) => 
+    setEditingMessageId(typeof messageId === 'number' ? messageId : messageId.id), 
+    [setEditingMessageId]
+  );
+
+  const onDeleteCallback = React.useCallback((messageId: ExtendedMessage | number) => 
+    handleDeleteMessage(typeof messageId === 'number' ? messageId : messageId.id), 
+    [handleDeleteMessage]
+  );
+
+  const onMouseEnterCallback = React.useCallback((e: React.MouseEvent<HTMLDivElement>, message?: ExtendedMessage) => {
+    // Отменяем таймер скрытия если он есть
+    if (hoverTimeoutRef?.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    if (setHoveredMessage && message) {
+      setHoveredMessage({ element: e.currentTarget, message });
+    }
+  }, [hoverTimeoutRef, setHoveredMessage]);
+
+  const onMouseLeaveCallback = React.useCallback(() => {
+    // Добавляем задержку перед скрытием
+    if (hoverTimeoutRef) {
+      hoverTimeoutRef.current = setTimeout(() => {
+        if (!isHoveringPortal?.current && setHoveredMessage) {
+          setHoveredMessage(null);
+        }
+      }, 100);
+    }
+  }, [hoverTimeoutRef, isHoveringPortal, setHoveredMessage]);
 
   // Render empty state (no messages or loading)
   const renderEmptyState = () => (
@@ -370,44 +427,69 @@ const MessageList: React.FC<MessageListProps> = ({
     </Box>
   );
 
-  // Add scroll pagination effect
+  // Pagination trigger refs
+  const topTriggerRef = React.useRef<HTMLDivElement>(null);
+  const bottomTriggerRef = React.useRef<HTMLDivElement>(null);
+
+  // Intersection Observer for pagination
   React.useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
+    const topTrigger = topTriggerRef.current;
+    const bottomTrigger = bottomTriggerRef.current;
+    
+    if (!topTrigger || !bottomTrigger) return;
 
-    let scrollThrottle = false;
-
-    const handleScroll = () => {
-      // Throttle scroll updates
-      if (scrollThrottle) return;
-      scrollThrottle = true;
-
-      requestAnimationFrame(() => {
-        const scrollTop = container.scrollTop;
-
-        // Check if scrolled to 20% from top for pagination
-        const scrollPercentageFromTop = scrollTop / container.scrollHeight;
-        if (scrollPercentageFromTop < 0.2 && 
-            paginationState.hasMoreMessages && 
-            !paginationState.isJumpingToMessage &&
-            paginationState.loadingMode !== 'pagination' &&
-            paginationState.loadingMode !== 'around') {
-          
-          // Trigger pagination
-          const oldestMessage = sortedMessages[0];
-          if (oldestMessage) {
-            paginationActions.setBeforeId(oldestMessage.id);
-            paginationActions.setLoadingMode('pagination');
-          }
+    const handleTopIntersection = (entries: IntersectionObserverEntry[]) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && 
+          paginationState.hasMoreMessages && 
+          !paginationState.isJumpingToMessage &&
+          paginationState.loadingMode !== 'pagination' &&
+          paginationState.loadingMode !== 'around') {
+        
+        const oldestMessage = sortedMessages[0];
+        if (oldestMessage) {
+          paginationActions.setBeforeId(oldestMessage.id);
+          paginationActions.setLoadingMode('pagination');
         }
-
-        scrollThrottle = false;
-      });
+      }
     };
 
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [sortedMessages, paginationState, paginationActions]);
+    const handleBottomIntersection = (entries: IntersectionObserverEntry[]) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && 
+          paginationState.enableAfterPagination &&
+          paginationState.hasMoreMessagesAfter && 
+          !paginationState.isJumpingToMessage &&
+          paginationState.loadingMode !== 'pagination' &&
+          paginationState.loadingMode !== 'around') {
+        
+        const newestMessage = sortedMessages[sortedMessages.length - 1];
+        if (newestMessage) {
+          paginationActions.setAfterId(newestMessage.id);
+          paginationActions.setLoadingMode('pagination');
+        }
+      }
+    };
+
+    // Create observers with different thresholds
+    const topObserver = new IntersectionObserver(handleTopIntersection, {
+      root: messagesContainerRef.current,
+      threshold: 0.1
+    });
+
+    const bottomObserver = new IntersectionObserver(handleBottomIntersection, {
+      root: messagesContainerRef.current,
+      threshold: 0.8
+    });
+
+    topObserver.observe(topTrigger);
+    bottomObserver.observe(bottomTrigger);
+
+    return () => {
+      topObserver.disconnect();
+      bottomObserver.disconnect();
+    };
+  }, [sortedMessages, paginationState, paginationActions, messagesContainerRef]);
   
   // Эффект для прокрутки к сообщению по scrollToMessageIdRef или forceScrollToMessageId
   React.useEffect(() => {
@@ -421,6 +503,19 @@ const MessageList: React.FC<MessageListProps> = ({
         (scrollToMessageIdRef?.current || null);
         
     if (messageIdToScroll === null) return;
+    
+    // Не прокручиваем автоматически если включена пагинация after (пользователь скроллит вниз)
+    if (paginationState.enableAfterPagination && paginationState.loadingMode === 'pagination' && paginationState.afterId) {
+      // Сбрасываем значение в ref без прокрутки
+      if (scrollToMessageIdRef) {
+        scrollToMessageIdRef.current = null;
+      }
+      // Также сбрасываем forceScrollToMessageId если он есть
+      if (forceScrollToMessageId !== null) {
+        // Нужно сбросить через prop, но у нас нет setter. Просто возвращаемся без действий
+      }
+      return;
+    }
     
     // Ищем элемент сообщения по ID
     const messageElement = container.querySelector(`[data-msg-id="${messageIdToScroll}"]`);
@@ -467,7 +562,28 @@ const MessageList: React.FC<MessageListProps> = ({
         }, 1500);
       }
     }
-  }, [messages, forceScrollToMessageId, scrollToMessageIdRef?.current, focusedMessageId, highlightTimeoutRef, setHighlightedMessages, setFocusedMessageId, scrollCorrectionRef]);
+  }, [forceScrollToMessageId, scrollToMessageIdRef?.current, focusedMessageId, highlightTimeoutRef, setHighlightedMessages, setFocusedMessageId, scrollCorrectionRef, paginationState.enableAfterPagination, paginationState.loadingMode, paginationState.afterId]);
+
+  // Эффект для очистки подсветки при пагинации
+  React.useEffect(() => {
+    // Очищаем подсветку при запуске пагинации after (пользователь скроллит вниз)
+    if (paginationState.enableAfterPagination && paginationState.loadingMode === 'pagination' && paginationState.afterId) {
+      // Очищаем таймер подсветки
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+        highlightTimeoutRef.current = null;
+      }
+      
+      // Убираем подсветку
+      setHighlightedMessages(new Set());
+      setFocusedMessageId(null);
+      
+      // Очищаем scroll refs чтобы предотвратить возврат к сообщению
+      if (scrollToMessageIdRef) {
+        scrollToMessageIdRef.current = null;
+      }
+    }
+  }, [paginationState.enableAfterPagination, paginationState.loadingMode, paginationState.afterId, highlightTimeoutRef, setHighlightedMessages, setFocusedMessageId, scrollToMessageIdRef]);
 
   return (
     <Box 
@@ -475,12 +591,15 @@ const MessageList: React.FC<MessageListProps> = ({
       className="messages-container"
       sx={{ 
         flex: 1, 
-        p: 3, 
+        px: 3,
+        pt: 3,
+        pb: 1,
         overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
         gap: 1,
         position: 'relative',
+        willChange: 'scroll-position',
         '&::-webkit-scrollbar': {
           width: '8px',
         },
@@ -536,17 +655,20 @@ const MessageList: React.FC<MessageListProps> = ({
           </Fade>
 
 
+
+          {/* Pagination triggers */}
+          <div ref={topTriggerRef} style={{ height: '1px', margin: '20px 0' }} />
+
           {/* Messages */}
           {(() => {
             let result: React.ReactElement[] = [];
             let prevAuthorId: number | null = null;
-            let prevMessageTime: string | null = null;
+            let prevMessageTimestamp: string | null = null;
             let currentGroup: React.ReactElement[] = [];
             let currentDateString: string | null = null;
             let processedDates = new Set<string>();
 
-            // Combine real and temporary messages
-            const allMessages = [...sortedMessages, ...Array.from(tempMessages.values())];
+            // Use pre-computed combined messages
 
             allMessages.forEach((msg) => {
               const messageDate = new Date(msg.created_at);
@@ -570,27 +692,39 @@ const MessageList: React.FC<MessageListProps> = ({
                       display: 'flex',
                       justifyContent: 'center',
                       alignItems: 'center',
-                      my: 2,
+                      my: 3,
                       position: 'relative',
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        top: '50%',
+                        left: 0,
+                        right: 0,
+                        height: '1px',
+                        background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 20%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0.2) 80%, transparent 100%)',
+                        zIndex: 0
+                      }
                     }}
                   >
                     <Box
                       sx={{
-                        backgroundColor: 'rgba(30,30,47,0.85)',
+                        backgroundColor: 'rgba(30,30,47,0.95)',
                         backdropFilter: 'blur(8px)',
-                        px: 2,
-                        py: 0.75,
-                        borderRadius: '12px',
-                        boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+                        px: 3,
+                        py: 1,
+                        borderRadius: '16px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+                        border: '1px solid rgba(255,255,255,0.15)',
                         zIndex: 1
                       }}
                     >
                       <Typography
                         variant="body2"
                         sx={{
-                          color: 'text.secondary',
-                          fontWeight: 500,
-                          fontSize: '0.85rem'
+                          color: 'rgba(255,255,255,0.85)',
+                          fontWeight: 600,
+                          fontSize: '0.8rem',
+                          letterSpacing: '0.5px'
                         }}
                       >
                         {formatDateForGroup(msg.created_at)}
@@ -604,7 +738,13 @@ const MessageList: React.FC<MessageListProps> = ({
               }
 
               const isTempMessage = 'temp_id' in msg;
-              const isFirstOfGroup = msg.author?.id !== prevAuthorId;
+              
+              // Check if this message should start a new group
+              const isFirstOfGroup = 
+                msg.author?.id !== prevAuthorId || // Different author
+                !prevMessageTimestamp || // No previous message
+                !isWithinTimeThreshold(msg.created_at, prevMessageTimestamp, 30) || // More than 30 minutes apart
+                !isSameDay(msg.created_at, prevMessageTimestamp); // Different day
               
               const messageElement = editingMessageId === msg.id ? (
                 <Box
@@ -744,40 +884,19 @@ const MessageList: React.FC<MessageListProps> = ({
                   searchQuery={searchQuery}
                   currentUserId={user.id}
                   hubId={hubId}
-                  signedUrls={signedUrls}
                   loadingMode={paginationState.loadingMode}
-                  onReply={(message) => {
-                    setReplyingToMessage(message);
-                  }}
-                  onEdit={(messageId) => setEditingMessageId(typeof messageId === 'number' ? messageId : messageId.id)}
-                  onDelete={(messageId) => handleDeleteMessage(typeof messageId === 'number' ? messageId : messageId.id)}
+                  onReply={onReplyCallback}
+                  onEdit={onEditCallback}
+                  onDelete={onDeleteCallback}
                   onReplyClick={handleReplyClick}
-                  onMouseEnter={(e, message) => {
-                    // Отменяем таймер скрытия если он есть
-                    if (hoverTimeoutRef?.current) {
-                      clearTimeout(hoverTimeoutRef.current);
-                      hoverTimeoutRef.current = null;
-                    }
-                    if (setHoveredMessage && message) {
-                      setHoveredMessage({ element: e.currentTarget, message });
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    // Добавляем задержку перед скрытием
-                    if (hoverTimeoutRef) {
-                      hoverTimeoutRef.current = setTimeout(() => {
-                        if (!isHoveringPortal?.current && setHoveredMessage) {
-                          setHoveredMessage(null);
-                        }
-                      }, 100);
-                    }
-                  }}
+                  onMouseEnter={onMouseEnterCallback}
+                  onMouseLeave={onMouseLeaveCallback}
                 />
               );
 
               currentGroup.push(messageElement);
               prevAuthorId = msg.author.id;
-              prevMessageTime = msg.created_at;
+              prevMessageTimestamp = msg.created_at;
             });
 
             if (currentGroup.length > 0) {
@@ -788,12 +907,15 @@ const MessageList: React.FC<MessageListProps> = ({
             return result;
           })()}
 
+          {/* Bottom pagination trigger */}
+          <div ref={bottomTriggerRef} style={{ height: '1px', margin: '2px 0' }} />
+
           {/* For properly tracking the end of messages for scrolling */}
           <div ref={messagesEndRef} />
         </>
       )}
     </Box>
   );
-};
+  };
 
-export default MessageList;
+  export default MessageList;

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { useWebSocket } from '@/websocket/useWebSocket';
 import { webSocketService } from '@/websocket/WebSocketService';
 import type { Message } from '@/api/channels';
@@ -61,21 +61,37 @@ export const useMessageWebSocket = (
   // Debouncing for bulk-read-all calls
   const lastBulkReadAllTimeRef = useRef<number>(0);
   
+  // Use refs to keep stable references to callbacks and options
+  const callbacksRef = useRef(callbacks);
+  const optionsRef = useRef(options);
+  
+  // Update refs when values change
+  useEffect(() => {
+    callbacksRef.current = callbacks;
+  }, [callbacks]);
+  
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+  
   const debouncedBulkReadAll = useCallback(() => {
     if (!activeChannel) return;
     
     const now = Date.now();
-    if (now - lastBulkReadAllTimeRef.current > 1000 && now - options.bulkReadAllRef.current > 1000) {
+    if (now - lastBulkReadAllTimeRef.current > 1000 && now - optionsRef.current.bulkReadAllRef.current > 1000) {
       lastBulkReadAllTimeRef.current = now;
-      options.bulkReadAllRef.current = now;
+      optionsRef.current.bulkReadAllRef.current = now;
       webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
-      callbacks.onMarkAllAsRead();
+      callbacksRef.current.onMarkAllAsRead();
     }
-  }, [activeChannel, callbacks.onMarkAllAsRead, options.bulkReadAllRef]);
+  }, [activeChannel?.id]);
 
   const handleNewMessage = useCallback((data: WebSocketMessageData) => {
+    const currentOptions = optionsRef.current;
+    const currentCallbacks = callbacksRef.current;
+    
     if (data.type === 'MESSAGE_CREATE' && data.message) {
-      const newMessage = options.convertToExtendedMessage(data.message);
+      const newMessage = currentOptions.convertToExtendedMessage(data.message);
       
       // Skip processing if the message is from the current user
       if (newMessage.author.id === user?.id) {
@@ -83,14 +99,14 @@ export const useMessageWebSocket = (
       }
       
       // Add new message
-      callbacks.onMessageCreate(newMessage);
+      currentCallbacks.onMessageCreate(newMessage);
       
       // Highlight message temporarily
-      callbacks.onHighlightMessage(newMessage.id, 1500);
+      currentCallbacks.onHighlightMessage(newMessage.id, 1500);
       
       // Handle NEW message status
       if (newMessage.status === MessageStatus.NEW) {
-        const container = options.messagesContainerRef.current;
+        const container = currentOptions.messagesContainerRef.current;
         if (container) {
           const scrollPosition = container.scrollHeight - container.scrollTop - container.clientHeight;
           const isAtBottom = scrollPosition < 100;
@@ -98,20 +114,20 @@ export const useMessageWebSocket = (
           
           if (isAtBottom && activeChannel) {
             // User is at bottom - mark as read immediately
-            options.addToReadBuffer(newMessage.id);
-            callbacks.onMarkMessageAsRead(newMessage.id);
+            currentOptions.addToReadBuffer(newMessage.id);
+            currentCallbacks.onMarkMessageAsRead(newMessage.id);
             
             // Auto-scroll if not jumping to message
-            if (options.loadingMode !== 'around' && !options.isJumpingToMessage) {
-              callbacks.onScrollToBottom();
+            if (currentOptions.loadingMode !== 'around' && !currentOptions.isJumpingToMessage) {
+              currentCallbacks.onScrollToBottom();
             }
             
             // Mark all messages as read
             debouncedBulkReadAll();
           } else if (isScrolledUpSignificantly) {
             // User is scrolled up significantly - show indicator
-            callbacks.onNewMessageIndicator(true);
-            callbacks.onUnreadMessage(newMessage.id);
+            currentCallbacks.onNewMessageIndicator(true);
+            currentCallbacks.onUnreadMessage(newMessage.id);
             
             // Check if message becomes visible
             setTimeout(() => {
@@ -121,18 +137,18 @@ export const useMessageWebSocket = (
                 const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
                 
                 if (isVisible && activeChannel) {
-                  options.addToReadBuffer(newMessage.id);
-                  callbacks.onMarkMessageAsRead(newMessage.id);
+                  currentOptions.addToReadBuffer(newMessage.id);
+                  currentCallbacks.onMarkMessageAsRead(newMessage.id);
                 }
               }
             }, 100);
           } else {
             // User is slightly scrolled up - auto-scroll and mark as read
-            options.addToReadBuffer(newMessage.id);
-            callbacks.onMarkMessageAsRead(newMessage.id);
+            currentOptions.addToReadBuffer(newMessage.id);
+            currentCallbacks.onMarkMessageAsRead(newMessage.id);
             
-            if (options.loadingMode !== 'around' && !options.isJumpingToMessage) {
-              callbacks.onScrollToBottom();
+            if (currentOptions.loadingMode !== 'around' && !currentOptions.isJumpingToMessage) {
+              currentCallbacks.onScrollToBottom();
             }
             
             // Mark all messages as read
@@ -141,39 +157,24 @@ export const useMessageWebSocket = (
         }
       }
     } else if (data.type === 'MESSAGE_UPDATE' && data.message) {
-      const updatedMessage = options.convertToExtendedMessage(data.message);
-      callbacks.onMessageUpdate(updatedMessage);
+      const updatedMessage = currentOptions.convertToExtendedMessage(data.message);
+      currentCallbacks.onMessageUpdate(updatedMessage);
       
       // Update unread status if message status changed to read
       if (updatedMessage.status === MessageStatus.READ) {
-        callbacks.onUnreadCountChange(-1);
+        currentCallbacks.onUnreadCountChange(-1);
       }
     } else if (data.type === 'MESSAGE_DELETE' && data.messageId) {
-      callbacks.onMessageDelete(data.messageId);
-      callbacks.onUnreadCountChange(-1);
+      currentCallbacks.onMessageDelete(data.messageId);
+      currentCallbacks.onUnreadCountChange(-1);
     } else if (data.type === 'MESSAGE_READ_STATUS' && data.message_range) {
       // Handle message read status updates
-      callbacks.onMessageReadStatus(data.message_range);
+      currentCallbacks.onMessageReadStatus(data.message_range);
     }
   }, [
     user?.id,
-    activeChannel,
-    options.convertToExtendedMessage,
-    options.isJumpingToMessage,
-    options.loadingMode,
-    options.messagesContainerRef,
-    options.addToReadBuffer,
-    callbacks.onMessageCreate,
-    callbacks.onMessageUpdate,
-    callbacks.onMessageDelete,
-    callbacks.onMessageReadStatus,
-    callbacks.onHighlightMessage,
-    callbacks.onUnreadMessage,
-    callbacks.onMarkMessageAsRead,
-    callbacks.onNewMessageIndicator,
-    callbacks.onScrollToBottom,
-    debouncedBulkReadAll,
-    callbacks.onUnreadCountChange
+    activeChannel?.id,
+    debouncedBulkReadAll
   ]);
 
   // Subscribe to user-specific queue

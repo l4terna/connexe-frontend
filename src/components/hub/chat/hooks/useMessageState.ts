@@ -133,6 +133,40 @@ export const useMessageState = () => {
     setNewMessagesCount(0);
   }, []);
 
+  // Функции для работы с очередью временных сообщений
+  const addTempMessage = useCallback((tempId: string, tempMessage: ExtendedMessage) => {
+    setTempMessages(prev => {
+      const newMap = new Map(prev);
+      newMap.set(tempId, tempMessage);
+      return newMap;
+    });
+  }, []);
+
+  const removeTempMessage = useCallback((tempId: string) => {
+    setTempMessages(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(tempId);
+      return newMap;
+    });
+  }, []);
+
+  const updateTempMessage = useCallback((tempId: string, status: 'sending' | 'error') => {
+    setTempMessages(prev => {
+      const newMap = new Map(prev);
+      const existingMessage = newMap.get(tempId);
+      if (existingMessage) {
+        const updatedMessage = {
+          ...existingMessage,
+          status: status === 'sending' ? MessageStatus.SENT : MessageStatus.NEW,
+          // Добавляем флаг для UI чтобы показать статус отправки/ошибки
+          _tempStatus: status
+        };
+        newMap.set(tempId, updatedMessage as ExtendedMessage);
+      }
+      return newMap;
+    });
+  }, []);
+
   return {
     // State
     messages,
@@ -158,6 +192,11 @@ export const useMessageState = () => {
     addUnreadMessage,
     removeUnreadMessage,
     updateUnreadCount,
-    resetUnreadCounts
+    resetUnreadCounts,
+    
+    // Temp message queue functions
+    addTempMessage,
+    removeTempMessage,
+    updateTempMessage
   };
 };

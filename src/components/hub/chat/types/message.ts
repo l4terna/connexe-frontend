@@ -36,4 +36,5 @@ export interface ExtendedMessage extends Message {
   status: MessageStatus;
   channel_id?: number;
   reply_to?: number | null;
+  _tempStatus?: 'sending' | 'error'; // Временный статус для UI очереди
 }

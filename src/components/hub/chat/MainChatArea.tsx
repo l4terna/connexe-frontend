@@ -23,6 +23,7 @@ import { useMessageScroll } from './hooks/useMessageScroll';
 import { useMessageSearch } from './hooks/useMessageSearch';
 import { useMessageWebSocket } from './hooks/useMessageWebSocket';
 import { useMessageState } from './hooks/useMessageState';
+import { useMessageQueue } from './hooks/useMessageQueue';
 import { ExtendedMessage, MessageStatus } from './types/message';
 import { webSocketService } from '@/websocket/WebSocketService';
 
@@ -69,7 +70,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     addUnreadMessage,
     removeUnreadMessage,
     updateUnreadCount,
-    resetUnreadCounts
+    resetUnreadCounts,
+    addTempMessage,
+    removeTempMessage,
+    updateTempMessage
   } = useMessageState();
   
   // Использование хука пагинации
@@ -1003,6 +1007,43 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     replyingToMessageRef.current = replyingToMessage;
   }, [replyingToMessage]);
 
+  // Функция для API вызова отправки сообщения (без UI логики)
+  const sendMessageToAPI = useCallback(async (values: { content: string; images?: File[] }, replyMessage?: ExtendedMessage | null) => {
+    if (!activeChannel) return;
+
+    // Prepare payload for API request
+    const apiPayload = {
+      channelId: activeChannel.id,
+      content: values.content,
+      ...(values.images && values.images.length > 0 ? { attachments: values.images } : {}),
+      ...(replyMessage?.id ? { replyId: replyMessage.id } : {})
+    };
+    
+    // Send message to the server
+    const result = await createMessage(apiPayload).unwrap();
+    
+    // Add the real message with server-generated ID
+    const newMessage: ExtendedMessage = {
+      ...result,
+      status: MessageStatus.SENT,
+      channel_id: activeChannel.id,
+      reply: result.reply ? convertToExtendedMessage(result.reply) : null
+    };
+    
+    setMessages(prev => [...prev, newMessage]);
+    
+    return result;
+  }, [activeChannel, createMessage, convertToExtendedMessage, setMessages]);
+
+  // Хук для управления очередью сообщений
+  const { queueMessage, clearQueue } = useMessageQueue({
+    onSendMessage: sendMessageToAPI,
+    onAddTempMessage: addTempMessage,
+    onRemoveTempMessage: removeTempMessage,
+    onUpdateTempMessage: updateTempMessage,
+    activeChannel,
+    user
+  });
 
   const handleSendMessage = useCallback(async (values: { content: string, images?: File[] }, { resetForm }: { resetForm: () => void }) => {
     if (!activeChannel || !user) return;
@@ -1013,92 +1054,20 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Require either content or images
     if (!content && !hasImages) return;
 
-    // Clear the input field immediately
-    resetForm();
+    // Capture reply message before clearing
+    const replyMessage = replyingToMessageRef.current;
     
-    // Declare tempId and capture reply message outside try block
-    const tempId = Date.now();
-    const replyMessage = replyingToMessageRef.current; // Use ref to get current value
-    
-    // Clear the reply state immediately after capturing the value
+    // Clear the reply state immediately
     setReplyingToMessage(null);
     
-    try {
-      const tempMessage: ExtendedMessage = {
-        id: -1, // Temporary ID
-        content: values.content,
-        author: user,
-        created_at: new Date().toISOString(),
-        last_modified_at: undefined,
-        attachments: [], // Required by Message interface
-        status: MessageStatus.SENT,
-        read_by_count: 0,
-        channel_id: activeChannel.id, // Добавляем для проверки канала
-        reply: replyMessage || undefined // Преобразуем null в undefined
-      };
-      
-      // Add temporary message to the UI
-      setTempMessages(prev => {
-        const newMap = new Map(prev);
-        newMap.set(String(tempId), tempMessage);
-        return newMap;
-      });
-      
-      // Scroll to bottom immediately after adding the temporary message
-      setTimeout(() => {
-        scrollToBottom();
-      }, 10);
-      
-      resetForm();
-
-      // Prepare payload for API request
-      const apiPayload = {
-        channelId: activeChannel.id,
-        content: values.content,
-        ...(hasImages ? { attachments: values.images } : {}),
-        ...(replyMessage?.id ? { replyId: replyMessage.id } : {})
-      };
-      
-      // Send message to the server
-      const result = await createMessage(apiPayload).unwrap();
-      
-      // Remove the temporary message once we get confirmation
-      setTempMessages(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(String(tempId));
-        return newMap;
-      });
-      
-      // Add the real message with server-generated ID
-      // Create a properly typed ExtendedMessage from the API result
-      const newMessage: ExtendedMessage = {
-        ...result,
-        status: MessageStatus.SENT,
-        channel_id: activeChannel.id, // Добавляем для проверки канала
-        reply: result.reply ? convertToExtendedMessage(result.reply) : null // Convert reply to ExtendedMessage
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
-      
-      // No need to scroll again here as we already scrolled after adding the temporary message
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      
-      // Remove the temporary message on error
-      setTempMessages(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(String(tempId));
-        return newMap;
-      });
-      
-      // Type guard for error object
-      if (typeof error === 'object' && error !== null && 'status' in error && error.status === 403 && 'data' in error && typeof error.data === 'object' && error.data !== null && 'type' in error.data && error.data.type === 'ACCESS_DENIED') {
-        notify('Недостаточно прав для отправки сообщения', 'error');
-      } else {
-        notify('Ошибка при отправке сообщения', 'error');
-      }
-    }
-  }, [activeChannel, user, createMessage, notify, scrollToBottom]);
+    // Queue the message with debounce
+    queueMessage(values, { resetForm }, replyMessage);
+    
+    // Scroll to bottom after a short delay to account for the temporary message being added
+    setTimeout(() => {
+      scrollToBottom();
+    }, 50);
+  }, [activeChannel, user, queueMessage, scrollToBottom]);
 
   const handleEditMessage = useCallback(async (values: { content: string }, { resetForm }: { resetForm: () => void }) => {
     if (!editingMessageId || !activeChannel) return;

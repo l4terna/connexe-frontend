@@ -22,6 +22,7 @@ import { useMessageScroll } from '../hub/chat/hooks/useMessageScroll';
 import { useMessageSearch } from '../hub/chat/hooks/useMessageSearch';
 import { useMessageWebSocket } from '../hub/chat/hooks/useMessageWebSocket';
 import { useMessageState } from '../hub/chat/hooks/useMessageState';
+import { useMessageQueue } from '../hub/chat/hooks/useMessageQueue';
 import { ExtendedMessage, MessageStatus } from '../hub/chat/types/message';
 
 interface PrivateChatAreaProps {
@@ -67,7 +68,10 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
     addUnreadMessage,
     removeUnreadMessage,
     updateUnreadCount,
-    resetUnreadCounts
+    resetUnreadCounts,
+    addTempMessage,
+    removeTempMessage,
+    updateTempMessage
   } = useMessageState();
   
   // Использование хука пагинации
@@ -581,6 +585,44 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
     replyingToMessageRef.current = replyingToMessage;
   }, [replyingToMessage]);
 
+  // Функция для API вызова отправки сообщения (без UI логики)
+  const sendMessageToAPI = useCallback(async (values: { content: string; images?: File[] }, replyMessage?: ExtendedMessage | null) => {
+    if (!activeChannel) return;
+
+    // Prepare payload for API request
+    const apiPayload = {
+      channelId: activeChannel.id,
+      content: values.content,
+      ...(values.images && values.images.length > 0 ? { attachments: values.images } : {}),
+      ...(replyMessage?.id ? { replyId: replyMessage.id } : {})
+    };
+    
+    // Send message to the server
+    const result = await createMessage(apiPayload).unwrap();
+    
+    // Add the real message with server-generated ID
+    const newMessage: ExtendedMessage = {
+      ...result,
+      status: MessageStatus.SENT,
+      channel_id: activeChannel.id,
+      reply: result.reply ? convertToExtendedMessage(result.reply) : null
+    };
+    
+    setMessages(prev => [...prev, newMessage]);
+    
+    return result;
+  }, [activeChannel, createMessage, convertToExtendedMessage, setMessages]);
+
+  // Хук для управления очередью сообщений
+  const { queueMessage, clearQueue } = useMessageQueue({
+    onSendMessage: sendMessageToAPI,
+    onAddTempMessage: addTempMessage,
+    onRemoveTempMessage: removeTempMessage,
+    onUpdateTempMessage: updateTempMessage,
+    activeChannel,
+    user
+  });
+
   const handleSendMessage = useCallback(async (values: { content: string, images?: File[] }, { resetForm }: { resetForm: () => void }) => {
     if (!activeChannel || !user) return;
 
@@ -589,85 +631,20 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
     
     if (!content && !hasImages) return;
 
-    resetForm();
-    
-    const tempId = Date.now();
+    // Capture reply message before clearing
     const replyMessage = replyingToMessageRef.current;
     
+    // Clear the reply state immediately
     setReplyingToMessage(null);
     
-    try {
-      const tempMessage: ExtendedMessage = {
-        id: -1,
-        content: values.content,
-        author: user,
-        created_at: new Date().toISOString(),
-        last_modified_at: undefined,
-        attachments: [],
-        status: MessageStatus.SENT,
-        read_by_count: 0,
-        channel_id: activeChannel.id,
-        reply: replyMessage ? {
-          ...replyMessage,
-          status: replyMessage.status || MessageStatus.SENT
-        } : undefined
-      };
-      
-      setTempMessages(prev => {
-        const newMap = new Map(prev);
-        newMap.set(String(tempId), tempMessage);
-        return newMap;
-      });
-      
-      setTimeout(() => {
-        scrollToBottom();
-      }, 10);
-      
-      resetForm();
-
-      const apiPayload = {
-        channelId: activeChannel.id,
-        content: values.content,
-        ...(hasImages ? { attachments: values.images } : {}),
-        ...(replyMessage?.id ? { replyId: replyMessage.id } : {})
-      };
-      
-      const result = await createMessage(apiPayload).unwrap();
-      
-      setTempMessages(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(String(tempId));
-        return newMap;
-      });
-      
-      const newMessage: ExtendedMessage = {
-        ...result,
-        status: MessageStatus.SENT,
-        channel_id: activeChannel.id,
-        reply: result.reply ? {
-          ...result.reply,
-          status: (result.reply as any).status || MessageStatus.SENT
-        } as ExtendedMessage : undefined
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
-      
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      
-      setTempMessages(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(String(tempId));
-        return newMap;
-      });
-      
-      if (typeof error === 'object' && error !== null && 'status' in error && error.status === 403 && 'data' in error && typeof error.data === 'object' && error.data !== null && 'type' in error.data && error.data.type === 'ACCESS_DENIED') {
-        notify('Недостаточно прав для отправки сообщения', 'error');
-      } else {
-        notify('Ошибка при отправке сообщения', 'error');
-      }
-    }
-  }, [activeChannel, user, createMessage, notify, scrollToBottom]);
+    // Queue the message with debounce
+    queueMessage(values, { resetForm }, replyMessage);
+    
+    // Scroll to bottom after a short delay to account for the temporary message being added
+    setTimeout(() => {
+      scrollToBottom();
+    }, 50);
+  }, [activeChannel, user, queueMessage, scrollToBottom]);
 
   const handleEditMessage = useCallback(async (values: { content: string }, { resetForm }: { resetForm: () => void }) => {
     if (!editingMessageId || !activeChannel) return;

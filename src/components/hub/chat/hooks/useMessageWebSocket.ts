@@ -106,55 +106,91 @@ export const useMessageWebSocket = (
       
       // Handle NEW message status
       if (newMessage.status === MessageStatus.NEW) {
+        // Store current scroll state before adding message
         const container = currentOptions.messagesContainerRef.current;
+        let wasAtBottom = false;
+        let shouldAutoScroll = false;
+        
         if (container) {
           const scrollPosition = container.scrollHeight - container.scrollTop - container.clientHeight;
-          const isAtBottom = scrollPosition < 100;
-          const isScrolledUpSignificantly = scrollPosition > 300;
+          wasAtBottom = scrollPosition < 100;
+          shouldAutoScroll = wasAtBottom || scrollPosition <= 300;
           
-          if (isAtBottom && activeChannel) {
-            // User is at bottom - mark as read immediately
-            currentOptions.addToReadBuffer(newMessage.id);
-            currentCallbacks.onMarkMessageAsRead(newMessage.id);
-            
-            // Auto-scroll if not jumping to message
-            if (currentOptions.loadingMode !== 'around' && !currentOptions.isJumpingToMessage) {
-              currentCallbacks.onScrollToBottom();
-            }
-            
-            // Mark all messages as read
-            debouncedBulkReadAll();
-          } else if (isScrolledUpSignificantly) {
-            // User is scrolled up significantly - show indicator
-            currentCallbacks.onNewMessageIndicator(true);
-            currentCallbacks.onUnreadMessage(newMessage.id);
-            
-            // Check if message becomes visible
+          console.log('[useMessageWebSocket] Pre-message scroll state:', {
+            messageId: newMessage.id,
+            scrollHeight: container.scrollHeight,
+            scrollTop: container.scrollTop,
+            clientHeight: container.clientHeight,
+            scrollPosition,
+            wasAtBottom,
+            shouldAutoScroll
+          });
+        }
+        
+        // Wait for DOM to update with the new message before scrolling
+        // Use multiple frames to ensure React has completely rendered the new message
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
             setTimeout(() => {
-              const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
-              if (messageElement) {
-                const rect = messageElement.getBoundingClientRect();
-                const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+              const container = currentOptions.messagesContainerRef.current;
+              if (container && activeChannel) {
+                console.log('[useMessageWebSocket] Post-message scroll state:', {
+                  messageId: newMessage.id,
+                  scrollHeight: container.scrollHeight,
+                  scrollTop: container.scrollTop,
+                  clientHeight: container.clientHeight,
+                  wasAtBottom,
+                  shouldAutoScroll
+                });
                 
-                if (isVisible && activeChannel) {
+                if (wasAtBottom) {
+                  // User was at bottom - mark as read immediately and scroll
                   currentOptions.addToReadBuffer(newMessage.id);
                   currentCallbacks.onMarkMessageAsRead(newMessage.id);
+                  
+                  // Auto-scroll if not jumping to message
+                  if (currentOptions.loadingMode !== 'around' && !currentOptions.isJumpingToMessage) {
+                    console.log('[useMessageWebSocket] Scrolling to new bottom:', container.scrollHeight);
+                    container.scrollTop = container.scrollHeight;
+                  }
+                  
+                  // Mark all messages as read
+                  debouncedBulkReadAll();
+                } else if (shouldAutoScroll) {
+                  // User is slightly scrolled up - auto-scroll and mark as read
+                  currentOptions.addToReadBuffer(newMessage.id);
+                  currentCallbacks.onMarkMessageAsRead(newMessage.id);
+                  
+                  if (currentOptions.loadingMode !== 'around' && !currentOptions.isJumpingToMessage) {
+                    console.log('[useMessageWebSocket] Auto-scrolling to new bottom:', container.scrollHeight);
+                    container.scrollTop = container.scrollHeight;
+                  }
+                  
+                  // Mark all messages as read
+                  debouncedBulkReadAll();
+                } else {
+                  // User is scrolled up significantly - show indicator
+                  currentCallbacks.onNewMessageIndicator(true);
+                  currentCallbacks.onUnreadMessage(newMessage.id);
+                  
+                  // Check if message becomes visible
+                  setTimeout(() => {
+                    const messageElement = document.querySelector(`[data-msg-id="${newMessage.id}"]`);
+                    if (messageElement) {
+                      const rect = messageElement.getBoundingClientRect();
+                      const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+                      
+                      if (isVisible && activeChannel) {
+                        currentOptions.addToReadBuffer(newMessage.id);
+                        currentCallbacks.onMarkMessageAsRead(newMessage.id);
+                      }
+                    }
+                  }, 100);
                 }
               }
-            }, 100);
-          } else {
-            // User is slightly scrolled up - auto-scroll and mark as read
-            currentOptions.addToReadBuffer(newMessage.id);
-            currentCallbacks.onMarkMessageAsRead(newMessage.id);
-            
-            if (currentOptions.loadingMode !== 'around' && !currentOptions.isJumpingToMessage) {
-              currentCallbacks.onScrollToBottom();
-            }
-            
-            // Mark all messages as read
-            debouncedBulkReadAll();
-          }
-        }
+            }, 10); // Small delay to ensure React has finished rendering
+          });
+        });
       }
     } else if (data.type === 'MESSAGE_UPDATE' && data.message) {
       const updatedMessage = currentOptions.convertToExtendedMessage(data.message);
@@ -169,6 +205,7 @@ export const useMessageWebSocket = (
       currentCallbacks.onUnreadCountChange(-1);
     } else if (data.type === 'MESSAGE_READ_STATUS' && data.message_range) {
       // Handle message read status updates
+      console.log('[useMessageWebSocket] Received MESSAGE_READ_STATUS:', data.message_range, 'channel:', data.channelId);
       currentCallbacks.onMessageReadStatus(data.message_range);
     }
   }, [

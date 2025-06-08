@@ -48,17 +48,22 @@ export const useMessageState = () => {
   }, []);
 
   const updateMessageReadByCount = useCallback((range: { from: number; to: number }, userId: number) => {
+    console.log('[useMessageState] Updating read_by_count for range:', range, 'by user:', userId);
     setMessages(prevMessages => {
-      return prevMessages.map(msg => {
-        if (msg.id >= range.from && msg.id <= range.to && msg.author.id === userId) {
+      const updatedMessages = prevMessages.map(msg => {
+        // Update read_by_count for all messages in range, regardless of author
+        if (msg.id >= range.from && msg.id <= range.to) {
           const currentCount = msg.read_by_count || 0;
+          const newCount = currentCount + 1;
+          console.log('[useMessageState] Message', msg.id, 'read_by_count:', currentCount, '->', newCount);
           return {
             ...msg,
-            read_by_count: currentCount + 1
+            read_by_count: newCount
           };
         }
         return msg;
       });
+      return updatedMessages;
     });
   }, []);
 

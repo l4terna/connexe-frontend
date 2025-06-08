@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Typography, Fade, Skeleton, IconButton } from '@mui/material';
 import UserAvatar from '../../../UserAvatar';
 import ChatMessageItem from './ChatMessageItem';
-import { Channel } from '../../../../api/channels';
+import { Channel } from '@/api/channels';
 import Input from '../../../common/Input';
 import { Formik, Form, Field } from 'formik';
 import * as Yup from 'yup';
@@ -10,8 +10,8 @@ import SendIcon from '@mui/icons-material/Send';
 import CloseIcon from '@mui/icons-material/Close';
 import { ExtendedMessage } from '../types/message';
 import { LoadingMode } from '../hooks/useMessagePagination';
-import { useSignMediaUrlsMutation } from '../../../../api/media';
-import { useMedia } from '../../../../context/MediaContext';
+import { useSignMediaUrlsMutation } from '@/api/media';
+import { useMedia } from '@/context/MediaContext';
 
 // Validation schema for editing messages
 const messageSchema = Yup.object().shape({
@@ -253,11 +253,15 @@ const MessageList: React.FC<MessageListProps> = ({
     [emptyMessages, isLoadingMore, isLoadingAround, paginationState.loadingMode, paginationState.isJumpingToMessage, activeChannel]
   );
 
-  // Memoize combined messages for performance
-  const allMessages = React.useMemo(() => 
-    [...sortedMessages, ...Array.from(tempMessages.values())],
-    [sortedMessages, tempMessages]
-  );
+  // Memoize combined messages for performance with temp message marking
+  const allMessages = React.useMemo(() => {
+    const tempMessageArray = Array.from(tempMessages.entries()).map(([tempId, msg]) => ({
+      ...msg,
+      __isTemp: true, // Mark temporary messages
+      __tempId: tempId // Include the temp ID for unique React keys
+    }));
+    return [...sortedMessages, ...tempMessageArray];
+  }, [sortedMessages, tempMessages]);
 
   // Add empty state JSX - will be rendered when shouldShowEmptyState is true
   const emptyStateMessage = shouldShowEmptyState && (
@@ -737,7 +741,7 @@ const MessageList: React.FC<MessageListProps> = ({
                 processedDates.add(messageDateString);
               }
 
-              const isTempMessage = 'temp_id' in msg;
+              const isTempMessage = '__isTemp' in msg && (msg as any).__isTemp;
               
               // Check if this message should start a new group
               const isFirstOfGroup = 
@@ -748,7 +752,7 @@ const MessageList: React.FC<MessageListProps> = ({
               
               const messageElement = editingMessageId === msg.id ? (
                 <Box
-                  key={isTempMessage ? `temp-${msg.created_at}` : msg.id}
+                  key={isTempMessage ? `temp-${(msg as any).__tempId}` : msg.id}
                   id={`message-${msg.id}`}
                   className="message-item"
                   data-date={msg.created_at}
@@ -873,7 +877,7 @@ const MessageList: React.FC<MessageListProps> = ({
                 </Box>
               ) : (
                 <ChatMessageItem
-                  key={isTempMessage ? `temp-${msg.created_at}` : msg.id}
+                  key={isTempMessage ? `temp-${(msg as any).__tempId}` : msg.id}
                   message={msg}
                   isFirstOfGroup={isFirstOfGroup}
                   isTempMessage={isTempMessage}

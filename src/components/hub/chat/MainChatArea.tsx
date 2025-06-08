@@ -151,8 +151,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     onMarkAllAsRead: markAllMessagesAsRead,
     bulkReadAllRef,
     paginationActions,
-    messagesPerPage: 50,
-    sendBulkReadAll
+    messagesPerPage: 50
   });
   
   // Assign scroll correction functions to ref for pagination use
@@ -494,7 +493,9 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Прокручиваем вниз после загрузки (будет вызвано в эффекте)
       // handleScrollToBottom вызовется автоматически после загрузки initial сообщений
-      // bulk-read-all will be sent when scrollToBottom is called
+      
+      // Send bulk-read-all when user clicks scroll-to-bottom button
+      sendBulkReadAll();
     }, 50);
   }, [paginationActions, setMessages, setTempMessages, setUnreadMessages, resetUnreadCounts, setTargetMessageId, setLastAroundId, setLoadingWithTimeout, sendBulkReadAll]);
 

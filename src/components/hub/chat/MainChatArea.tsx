@@ -87,15 +87,20 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   
   // Ref for bulk read all functionality
   const bulkReadAllRef = useRef<number>(0);
+  const lastBulkReadChannelRef = useRef<number | null>(null);
   
   // Function to send bulk-read-all WebSocket message
   const sendBulkReadAll = useCallback(() => {
     if (!activeChannel) return;
     
     const now = Date.now();
-    // Debounce to prevent sending too frequently (1 second cooldown)
-    if (now - bulkReadAllRef.current > 1000) {
+    // Check if we've already sent bulk-read-all for this channel recently
+    const isNewChannel = lastBulkReadChannelRef.current !== activeChannel.id;
+    const cooldownExpired = now - bulkReadAllRef.current > 2000;
+    
+    if (isNewChannel || cooldownExpired) {
       bulkReadAllRef.current = now;
+      lastBulkReadChannelRef.current = activeChannel.id;
       
       // Send bulk-read-all WebSocket message
       webSocketService.publish(`/app/v1/channels/${activeChannel.id}/messages/bulk-read-all`, {});
@@ -106,6 +111,13 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       resetUnreadCounts();
       
       console.log('[MainChatArea] Sent bulk-read-all for channel:', activeChannel.id);
+    } else {
+      console.log('[MainChatArea] Skipping bulk-read-all - already sent for this channel', {
+        timeSinceLastCall: now - bulkReadAllRef.current,
+        channelId: activeChannel.id,
+        isNewChannel,
+        cooldownExpired
+      });
     }
   }, [activeChannel, markAllMessagesAsRead, markAllMessagesAsReadInState, user.id, resetUnreadCounts]);
   
@@ -409,6 +421,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     setLoadingWithTimeout(false);
     lastAfterIdRef.current = null;
     lastBeforeIdRef.current = null;
+    // Reset bulk read tracking when changing channels
+    lastBulkReadChannelRef.current = null;
     
     // Clear search state (navigation logic removed)
     
@@ -429,8 +443,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     // Mark all messages as read when entering a channel
     if (activeChannel) {
       markAllMessagesAsRead();
-      // Send bulk-read-all when entering a channel
-      sendBulkReadAll();
+      // Don't send bulk-read-all here - it will be sent when scrollToBottom is called
     }
   }, [activeChannel?.id, markAllMessagesAsRead, resetMessageStates, sendBulkReadAll]); // Using id instead of the full object
 
@@ -481,9 +494,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       
       // Прокручиваем вниз после загрузки (будет вызвано в эффекте)
       // handleScrollToBottom вызовется автоматически после загрузки initial сообщений
-      
-      // Also send bulk-read-all when jumping to bottom
-      sendBulkReadAll();
+      // bulk-read-all will be sent when scrollToBottom is called
     }, 50);
   }, [paginationActions, setMessages, setTempMessages, setUnreadMessages, resetUnreadCounts, setTargetMessageId, setLastAroundId, setLoadingWithTimeout, sendBulkReadAll]);
 

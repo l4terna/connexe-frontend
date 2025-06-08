@@ -1,51 +1,71 @@
-import React from 'react';
+// SearchBar.tsx - изолированная версия
+import React, { useCallback, useMemo, useState, useRef } from 'react';
 import { Box, IconButton, Typography, Tooltip } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { Formik, Form, Field } from 'formik';
-import DOMPurify from 'dompurify';
-import { Message } from '../../../../api/channels';
+import { SearchResultItem } from './SearchResultItem';
+import { useSearchBar } from '../hooks/useSearchBar';
+import type { Message } from '@/api/channels';
 
 interface SearchBarProps {
-  searchMode: boolean;
-  setSearchMode: (mode: boolean) => void;
-  searchQuery: string;
-  searchInputRef: React.RefObject<HTMLInputElement | null>;
-  searchResultsRef: React.RefObject<HTMLDivElement | null>;
-  showSearchResults: boolean;
-  setShowSearchResults: (show: boolean) => void;
-  searchResults: Message[] | undefined;
-  isSearching: boolean;
-  debouncedSearchQuery: string;
-  handleSearchInputChange: (value: string) => void;
-  clearSearch: () => void;
+  activeChannelId: number | null;
   onSearchResultClick: (message: Message) => void;
+  // Optional search-related props from parent
+  searchMode?: boolean;
+  setSearchMode?: (mode: boolean) => void;
+  searchQuery?: string;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  searchResultsRef?: React.RefObject<HTMLDivElement | null>;
+  showSearchResults?: boolean;
+  setShowSearchResults?: (show: boolean) => void;
+  searchResults?: Message[];
+  isSearching?: boolean;
+  debouncedSearchQuery?: string;
+  handleSearchInputChange?: (value: string) => void;
+  clearSearch?: () => void;
+  loadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
 }
 
 const SearchBar: React.FC<SearchBarProps> = ({
-  searchMode,
-  setSearchMode,
-  searchQuery,
-  searchInputRef,
-  searchResultsRef,
-  showSearchResults,
-  setShowSearchResults,
-  searchResults,
-  isSearching,
-  debouncedSearchQuery,
-  handleSearchInputChange,
-  clearSearch,
-  onSearchResultClick
+  activeChannelId,
+  onSearchResultClick,
+  // Optional props from parent - игнорируем их для изоляции
 }) => {
-  const formatMessageTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-  };
+  // Полностью изолированная логика поиска - используем только внутренний хук
+  const hookValues = useSearchBar({ activeChannelId });
+  
+  // Используем только внутренние значения хука для полной изоляции
+  const searchMode = hookValues.searchMode;
+  const setSearchMode = hookValues.setSearchMode;
+  const searchQuery = hookValues.searchQuery;
+  const searchResults = hookValues.searchResults;
+  const debouncedSearchQuery = hookValues.debouncedSearchQuery;
+  const isSearching = hookValues.isSearching;
+  const showSearchResults = hookValues.showSearchResults;
+  const setShowSearchResults = hookValues.setShowSearchResults;
+  const searchInputRef = hookValues.searchInputRef;
+  const searchResultsRef = hookValues.searchResultsRef;
+  const handleSearchInputChange = hookValues.handleSearchInputChange;
+  const clearSearch = hookValues.clearSearch;
+  const hookHandleResultClick = hookValues.handleResultClick;
+
+  // Мемоизируем обработчик клика на результат
+  const handleResultClick = useCallback((message: Message) => {
+    // Важно: не закрываем поиск здесь, это будет сделано в обработчике
+    // Сначала проверяем наличие внешнего обработчика
+    if (onSearchResultClick) {
+      onSearchResultClick(message);
+    } else if (hookHandleResultClick) {
+      // Иначе используем внутренний обработчик из хука
+      hookHandleResultClick(message);
+    }
+    // Не закрываем поиск здесь, чтобы не прерывать навигацию
+  }, [onSearchResultClick, hookHandleResultClick]);
+
 
   if (!searchMode) {
     return (
@@ -53,11 +73,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
         <IconButton 
           onClick={() => {
             setSearchMode(true);
-            setTimeout(() => {
-              if (searchInputRef.current) {
-                searchInputRef.current.focus();
-              }
-            }, 100);
+            // Используем RAF для оптимизации
+            requestAnimationFrame(() => {
+              searchInputRef.current?.focus();
+            });
           }}
           sx={{
             color: 'rgba(255,255,255,0.6)',
@@ -73,20 +92,23 @@ const SearchBar: React.FC<SearchBarProps> = ({
     );
   }
 
+  const hasResults = searchResults && searchResults.length > 0;
+  const shouldShowResults = showSearchResults && searchQuery.trim();
+
   return (
     <Box sx={{ 
       display: 'flex', 
       flexDirection: 'column',
       position: 'relative',
-      zIndex: 1050
+      zIndex: 10001
     }}>
       <Box sx={{ 
         display: 'flex', 
         alignItems: 'center', 
         background: 'rgba(255,255,255,0.05)',
-        borderRadius: showSearchResults && searchQuery.trim() && searchResults && searchResults.length > 0 ? '20px 20px 0 0' : '20px',
+        borderRadius: shouldShowResults && hasResults ? '20px 20px 0 0' : '20px',
         border: '1px solid rgba(255,255,255,0.1)',
-        borderBottom: showSearchResults && searchQuery.trim() && searchResults && searchResults.length > 0 ? 'none' : '1px solid rgba(255,255,255,0.1)',
+        borderBottom: shouldShowResults && hasResults ? 'none' : '1px solid rgba(255,255,255,0.1)',
         paddingLeft: 2,
         paddingRight: 1,
         width: '300px',
@@ -101,7 +123,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
             <Form style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', position: 'relative' }}>
                 <Field name="query">
-                  {({ field, form }: any) => (
+                  {({ field }: any) => (
                     <input
                       {...field}
                       ref={searchInputRef}
@@ -110,12 +132,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
                         handleSearchInputChange(e.target.value);
                       }}
                       onFocus={() => {
-                        if (field.value?.trim() && searchResults && searchResults.length > 0) {
+                        if (field.value?.trim() && hasResults) {
                           setShowSearchResults(true);
                         }
-                      }}
-                      onBlur={(e) => {
-                        e.preventDefault();
                       }}
                       placeholder="Поиск сообщений..."
                       style={{
@@ -133,31 +152,12 @@ const SearchBar: React.FC<SearchBarProps> = ({
                             setShowSearchResults(false);
                           } else {
                             clearSearch();
-                            form.resetForm();
                           }
                         }
                       }}
                     />
                   )}
                 </Field>
-                {searchQuery.trim() && (
-                  <Typography 
-                    variant="caption" 
-                    sx={{ 
-                      position: 'absolute',
-                      right: 0,
-                      top: '-18px',
-                      color: searchResults && searchResults.length > 0 ? '#00FFBA' : '#FF69B4',
-                      fontSize: '0.7rem',
-                      fontWeight: 500,
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      background: 'rgba(0,0,0,0.3)'
-                    }}
-                  >
-                    {searchResults?.length || 0} {searchResults?.length === 1 ? 'result' : 'results'}
-                  </Typography>
-                )}
               </Box>
               <IconButton 
                 type="button"
@@ -186,23 +186,25 @@ const SearchBar: React.FC<SearchBarProps> = ({
       </Box>
       
       {/* Search Results Dropdown */}
-      {showSearchResults && searchQuery.trim() && (
+      {shouldShowResults && (
         <Box
           ref={searchResultsRef}
+          onMouseDown={(e) => e.preventDefault()}
           sx={{
             position: 'absolute',
             top: '100%',
             left: 0,
             width: '100%',
             maxHeight: '300px',
-            background: 'rgba(30,30,47,0.95)',
+            background: 'rgba(20, 20, 35, 0.98)',
             border: '1px solid rgba(255,255,255,0.1)',
             borderTop: 'none',
             borderRadius: '0 0 20px 20px',
             overflowY: 'auto',
-            zIndex: 1100,
-            backdropFilter: 'blur(10px)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+            overflowX: 'hidden',
+            zIndex: 10002,
+            backdropFilter: 'blur(15px)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
             '&::-webkit-scrollbar': {
               width: '6px',
             },
@@ -252,85 +254,13 @@ const SearchBar: React.FC<SearchBarProps> = ({
           )}
           
           {/* Search results */}
-          {!isSearching && searchResults && searchResults.length > 0 && searchResults.map((msg) => (
-            <Box
-              key={msg.id}
-              onClick={() => onSearchResultClick(msg)}
-              sx={{
-                p: 2,
-                borderBottom: '1px solid rgba(255,255,255,0.05)',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                '&:hover': {
-                  background: 'rgba(255,255,255,0.05)',
-                },
-                '&:last-child': {
-                  borderBottom: 'none',
-                }
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Typography sx={{ 
-                  color: '#00CFFF', 
-                  fontSize: '0.8rem', 
-                  fontWeight: 600,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  maxWidth: '150px'
-                }}>
-                  {msg.author.login}
-                </Typography>
-                <Typography sx={{ 
-                  color: 'rgba(255,255,255,0.4)', 
-                  fontSize: '0.7rem',
-                  ml: 'auto'
-                }}>
-                  {formatMessageTime(msg.created_at)}
-                </Typography>
-              </Box>
-              <Typography
-                sx={{ 
-                  color: 'rgba(255,255,255,0.8)', 
-                  fontSize: '0.85rem',
-                  lineHeight: 1.4,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  '& mark': {
-                    background: 'rgba(255, 105, 180, 0.3)',
-                    color: '#FF69B4',
-                    padding: '1px 2px',
-                    borderRadius: '2px',
-                    fontWeight: 600
-                  }
-                }}
-                dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(
-                    (() => {
-                      let content = msg.content;
-                      
-                      if (content.length > 150) {
-                        content = content.substring(0, 150) + '...';
-                      }
-                      
-                      content = content.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
-                      
-                      if (debouncedSearchQuery.trim()) {
-                        const query = debouncedSearchQuery.trim();
-                        const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const regex = new RegExp(`(${escapedQuery})`, 'gi');
-                        content = content.replace(regex, '<mark>$1</mark>');
-                      }
-                      
-                      return content;
-                    })()
-                  )
-                }}
-              />
-            </Box>
+          {!isSearching && hasResults && searchResults.map((msg, index) => (
+            <SearchResultItem
+              key={`${msg.id}-${index}`}
+              message={msg}
+              searchQuery={debouncedSearchQuery}
+              onResultClick={handleResultClick}
+            />
           ))}
         </Box>
       )}

@@ -47,7 +47,6 @@ const formatMessageTime = (timestamp: string) => {
 
 const formatReplyContent = (message: ReplyMessage | ExtendedMessage) => {
   // If there's text content, return it
-  console.log("mmmm", message)
   if (message.content && message.content.trim()) {
     return message.content;
   }
@@ -98,59 +97,51 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
   } = props;
 
   const [isHovered, setIsHovered] = useState(false);
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   
   // Check if message has image attachments
   const hasAttachments = message.attachments && message.attachments.length > 0;
-  
-  // Debug logging
-  console.log('ChatMessageItem render:', {
-    messageId: message.id,
-    attachments: message.attachments,
-    attachmentsLength: message.attachments?.length,
-    hasAttachments,
-    attachmentsType: typeof message.attachments,
-    isArray: Array.isArray(message.attachments)
-  });
+
   
   // Handle image preview click
-  const handleImageClick = (storageKey: string, index: number) => {
+  const handleImageClick = React.useCallback((storageKey: string, index: number) => {
     setViewingImage(storageKey);
     setCurrentImageIndex(index);
-  };
+  }, []);
   
 
   // Support different callback patterns
-  const handleReplyClick = () => {
+  const handleReplyClick = React.useCallback(() => {
     if (message.reply && onReplyClick) {
       onReplyClick(message.reply.id);
     }
-  };
+  }, [message.reply, onReplyClick]);
 
-  const handleReplyToClick = () => {
+  const handleReplyToClick = React.useCallback(() => {
     if (message && onReply) {
       onReply(message); // Reply to this message, not the reply message
     }
-  };
+  }, [message, onReply]);
 
-  const handleEditClick = () => {
+  const handleEditClick = React.useCallback(() => {
     if (onEdit) {
       // Support both new and old callback patterns
       if (typeof onEdit === 'function') {
         onEdit(message.id);
       }
     }
-  };
+  }, [onEdit, message.id]);
 
-  const handleDeleteClick = () => {
+  const handleDeleteClick = React.useCallback(() => {
     if (onDelete) {
       // Support both new and old callback patterns
       if (typeof onDelete === 'function') {
         onDelete(message.id);
       }
     }
-  };
+  }, [onDelete, message.id]);
 
   return (
     <>
@@ -160,12 +151,20 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
         data-date={message.created_at}
         data-msg-id={message.id.toString()}
         onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
+          // Clear any pending hide timeout
+          if (hoverTimeoutRef.current) {
+            clearTimeout(hoverTimeoutRef.current);
+            hoverTimeoutRef.current = null;
+          }
           setIsHovered(true);
           if (onMouseEnter) onMouseEnter(e, message);
         }}
         onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
-          setIsHovered(false);
-          if (onMouseLeave) onMouseLeave(e);
+          // Debounce hover state changes
+          hoverTimeoutRef.current = setTimeout(() => {
+            setIsHovered(false);
+            if (onMouseLeave) onMouseLeave(e);
+          }, 100);
         }}
         sx={{
           display: 'flex',
@@ -173,9 +172,14 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
           alignItems: 'flex-start',
           position: 'relative',
           borderRadius: '10px',
-          transition: 'background-color 0.3s ease, box-shadow 0.5s ease',
+          overflow: 'visible',
+          transition: 'background-color 0.2s ease',
           opacity: isTempMessage ? 0.6 : 1,
-          mt: isFirstInGroup ? 2 : 0,
+          // contentVisibility: 'auto',
+          // containIntrinsicSize: '0 80px',
+          mt: isFirstInGroup ? 3 : 0.5,
+          px: 1.5,
+          py: 0.5,
           backgroundColor: isFocused
             ? 'rgba(0, 207, 255, 0.25)' // Bright blue highlight for focused message (reply source)
             : isHighlighted
@@ -210,8 +214,8 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
               zIndex: 1000,
               padding: '6px 8px',
               borderRadius: '20px',
-              background: 'rgba(40, 44, 52, 0.85)',
-              backdropFilter: 'blur(6px)',
+              background: 'rgba(40, 44, 52, 0.95)',
+              // backdropFilter removed for performance
               boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
               transition: 'all 0.2s ease',
               opacity: 1,
@@ -231,7 +235,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                   transition: 'all 0.2s ease',
                   '&:hover': {
                     color: '#E5FBFF',
-                    transform: 'scale(1.1)',
+                    transform: 'scale(1.05)',
                   }
                 }}
               >
@@ -247,10 +251,10 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                     onClick={handleEditClick}
                     sx={{ 
                       color: '#00CFFF', 
-                      transition: 'all 0.2s ease',
+                      transition: 'transform 0.15s ease, color 0.15s ease',
                       '&:hover': {
                         color: '#E5FBFF',
-                        transform: 'scale(1.1)',
+                        transform: 'scale(1.02)',
                       }
                     }}
                   >
@@ -264,10 +268,10 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                     onClick={handleDeleteClick}
                     sx={{ 
                       color: '#FF3D71', 
-                      transition: 'all 0.2s ease',
+                      transition: 'transform 0.15s ease, color 0.15s ease',
                       '&:hover': {
                         color: '#FF708D',
-                        transform: 'scale(1.1)',
+                        transform: 'scale(1.02)',
                       }
                     }}
                   >
@@ -303,7 +307,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
         
         {/* Message content */}
         <Box sx={{ flex: 1, position: 'relative' }}>
-          <Box sx={{ maxWidth: '100%' }}>
+          <Box sx={{ maxWidth: '99%' }}>
             <Box sx={{ py: '5px', px: '0px', pl: 0 }}>
               {isFirstInGroup && (
                 <Typography sx={{ color: '#00CFFF', fontWeight: 700, mb: 0.5, fontSize: '1rem', letterSpacing: 0.2 }}>
@@ -315,37 +319,51 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
               {message.reply && (
                 <Box
                   sx={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    borderRadius: '4px',
-                    p: 1,
-                    background: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    mb: 1,
+                    mb: 0.8,
                     mt: 0.25,
-                    cursor: 'pointer',
-                    '&:hover': {
-                      background: 'rgba(255,255,255,0.06)',
-                    }
                   }}
-                  onClick={handleReplyClick}
                 >
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <ReplyIcon sx={{ fontSize: '0.9rem', color: '#00CFFF' }} />
-                    <Typography sx={{ color: '#00CFFF', fontSize: '0.82rem', fontWeight: '500' }}>
-                      {message.reply.author.login}
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      borderRadius: '8px',
+                      padding: '6px 10px',
+                      ml: 0,
+                      background: 'rgba(0, 207, 255, 0.06)',
+                      borderLeft: '3px solid #00CFFF',
+                      cursor: 'pointer',
+                      transition: 'transform 0.15s ease, color 0.15s ease',
+                      '&:hover': {
+                        background: 'rgba(0, 207, 255, 0.1)',
+                        transform: 'translateX(2px)',
+                      }
+                    }}
+                    onClick={handleReplyClick}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography sx={{ 
+                        color: '#00CFFF', 
+                        fontSize: '0.75rem', 
+                        fontWeight: '600',
+                        letterSpacing: 0.3
+                      }}>
+                        {message.reply.author.login}
+                      </Typography>
+                    </Box>
+                    <Typography sx={{ 
+                      color: 'rgba(255,255,255,0.6)', 
+                      fontSize: '0.8rem', 
+                      mt: 0.2, 
+                      lineHeight: 1.3,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '400px'
+                    }}>
+                      {formatReplyContent(message.reply)}
                     </Typography>
                   </Box>
-                  <Typography sx={{ 
-                    color: 'rgba(255,255,255,0.7)', 
-                    fontSize: '0.82rem', 
-                    mt: 0.3, 
-                    lineHeight: 1.3 
-                  }} 
-                  noWrap
-                  >
-                    {formatReplyContent(message.reply)}
-                  </Typography>
                 </Box>
               )}
             </Box>
@@ -366,67 +384,54 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                         borderRadius: 3,
                         overflow: 'hidden',
                         maxWidth: '450px',
+                        height: '300px', // Fixed height instead of aspect ratio
                         cursor: 'pointer',
-                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                         boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
                         background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
                         border: '1px solid rgba(255,255,255,0.08)',
                         '&:hover': {
-                          transform: 'translateY(-4px)',
-                          boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+                          transform: 'translateY(-2px)',
+                          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
                           border: '1px solid rgba(0, 207, 255, 0.3)',
                           '& .zoom-overlay': { opacity: 1 },
-                          '& .attachment-image': { transform: 'scale(1.03)' }
+                          '& .attachment-image': { transform: 'scale(1.02)' }
                         }
                       }}
                       onClick={() => handleImageClick(message.attachments[0], 0)}
                     >
-                      <Box
+                      <SimpleMediaImage
+                        storageKey={message.attachments[0]}
+                        className="attachment-image"
+                        alt=""
+                        loadingMode={loadingMode}
+                        staggerIndex={0}
                         sx={{
-                          position: 'relative',
                           width: '100%',
-                          paddingTop: '75%', // 4:3 aspect ratio
-                          '& > *': {
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: '100%',
-                          }
+                          height: '100%',
+                          borderRadius: 3,
+                          transition: 'transform 0.2s ease',
+                        }}
+                      />
+                      <Box
+                        className="zoom-overlay"
+                        sx={{
+                          position: 'absolute',
+                          inset: 0,
+                          background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: 0,
+                          transition: 'opacity 0.3s ease',
+                          // backdropFilter removed for performance
                         }}
                       >
-                        <SimpleMediaImage
-                          storageKey={message.attachments[0]}
-                          className="attachment-image"
-                          alt="Attachment"
-                          loadingMode={loadingMode}
-                          sx={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                          }}
-                        />
-                        <Box
-                          className="zoom-overlay"
-                          sx={{
-                            position: 'absolute',
-                            inset: 0,
-                            background: 'linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            opacity: 0,
-                            transition: 'opacity 0.3s ease',
-                            backdropFilter: 'blur(3px)',
-                          }}
-                        >
-                          <ZoomInIcon sx={{ 
-                            color: 'white', 
-                            fontSize: '36px',
-                            filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))'
-                          }} />
-                        </Box>
+                        <ZoomInIcon sx={{ 
+                          color: 'white', 
+                          fontSize: '36px',
+                          filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))'
+                        }} />
                       </Box>
                     </Box>
                   );
@@ -446,7 +451,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             flex: 1,
                             height: '200px',
                             cursor: 'pointer',
-                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                             boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
                             border: '1px solid rgba(255,255,255,0.08)',
                             '&:hover': {
@@ -455,20 +460,22 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                               border: '1px solid rgba(0, 207, 255, 0.3)',
                               zIndex: 2,
                               '& .zoom-overlay': { opacity: 1 },
-                              '& .attachment-image': { transform: 'scale(1.05)' }
+                              '& .attachment-image': { transform: 'scale(1.03)' }
                             }
                           }}
                           onClick={() => handleImageClick(attachment, index)}
                         >
-                          <SimpleMediaImage loadingMode={loadingMode}
+                          <SimpleMediaImage 
+                            loadingMode={loadingMode}
                             storageKey={attachment}
                             className="attachment-image"
-                            alt="Attachment"
+                            alt=""
+                            staggerIndex={index}
                             sx={{
                               width: '100%',
                               height: '100%',
                               objectFit: 'cover',
-                              transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              transition: 'transform 0.2s ease',
                             }}
                           />
                           <Box
@@ -482,7 +489,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                               justifyContent: 'center',
                               opacity: 0,
                               transition: 'opacity 0.3s ease',
-                              backdropFilter: 'blur(2px)',
+                              // backdropFilter removed for performance
                             }}
                           >
                             <ZoomInIcon sx={{ 
@@ -503,7 +510,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                               py: 0.5,
                               fontSize: '0.75rem',
                               fontWeight: 600,
-                              backdropFilter: 'blur(6px)',
+                              // backdropFilter removed for performance
                               border: '1px solid rgba(255,255,255,0.15)',
                             }}
                           >
@@ -527,16 +534,16 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           overflow: 'hidden',
                           flex: 2,
                           cursor: 'pointer',
-                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                           boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
                           border: '1px solid rgba(255,255,255,0.08)',
                           '&:hover': {
-                            transform: 'scale(1.02)',
+                            transform: 'scale(1.01)',
                             boxShadow: '0 12px 32px rgba(0,0,0,0.15)',
                             border: '1px solid rgba(0, 207, 255, 0.3)',
                             zIndex: 2,
                             '& .zoom-overlay': { opacity: 1 },
-                            '& .attachment-image': { transform: 'scale(1.05)' }
+                            '& .attachment-image': { transform: 'scale(1.03)' }
                           }
                         }}
                         onClick={() => handleImageClick(message.attachments[0], 0)}
@@ -544,12 +551,12 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                         <SimpleMediaImage loadingMode={loadingMode}
                           storageKey={message.attachments[0]}
                           className="attachment-image"
-                          alt="Attachment"
+                          alt=""
                           sx={{
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover',
-                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            transition: 'transform 0.2s ease',
                           }}
                         />
                         <Box
@@ -563,7 +570,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             justifyContent: 'center',
                             opacity: 0,
                             transition: 'opacity 0.3s ease',
-                            backdropFilter: 'blur(2px)',
+                            // backdropFilter removed for performance
                           }}
                         >
                           <ZoomInIcon sx={{ 
@@ -584,7 +591,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             py: 0.5,
                             fontSize: '0.75rem',
                             fontWeight: 600,
-                            backdropFilter: 'blur(6px)',
+                            // backdropFilter removed for performance
                             border: '1px solid rgba(255,255,255,0.15)',
                           }}
                         >
@@ -602,16 +609,16 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                               overflow: 'hidden',
                               flex: 1,
                               cursor: 'pointer',
-                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                               boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
                               border: '1px solid rgba(255,255,255,0.08)',
                               '&:hover': {
-                                transform: 'scale(1.03)',
+                                transform: 'scale(1.01)',
                                 boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
                                 border: '1px solid rgba(0, 207, 255, 0.3)',
                                 zIndex: 2,
                                 '& .zoom-overlay': { opacity: 1 },
-                                '& .attachment-image': { transform: 'scale(1.08)' }
+                                '& .attachment-image': { transform: 'scale(1.03)' }
                               }
                             }}
                             onClick={() => handleImageClick(attachment, index + 1)}
@@ -619,12 +626,12 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             <SimpleMediaImage loadingMode={loadingMode}
                               storageKey={attachment}
                               className="attachment-image"
-                              alt="Attachment"
+                              alt=""
                               sx={{
                                 width: '100%',
                                 height: '100%',
                                 objectFit: 'cover',
-                                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                transition: 'transform 0.2s ease',
                               }}
                             />
                             <Box
@@ -638,7 +645,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                                 justifyContent: 'center',
                                 opacity: 0,
                                 transition: 'opacity 0.3s ease',
-                                backdropFilter: 'blur(2px)',
+                                // backdropFilter removed for performance
                               }}
                             >
                               <ZoomInIcon sx={{ 
@@ -659,7 +666,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                                 py: 0.25,
                                 fontSize: '0.7rem',
                                 fontWeight: 600,
-                                backdropFilter: 'blur(6px)',
+                                // backdropFilter removed for performance
                                 border: '1px solid rgba(255,255,255,0.15)',
                               }}
                             >
@@ -691,11 +698,11 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             overflow: 'hidden',
                             aspectRatio: '1',
                             cursor: 'pointer',
-                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                             boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
                             border: '1px solid rgba(255,255,255,0.08)',
                             '&:hover': {
-                              transform: 'scale(1.05)',
+                              transform: 'scale(1.03)',
                               boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
                               border: '1px solid rgba(0, 207, 255, 0.3)',
                               zIndex: 2,
@@ -708,12 +715,12 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           <SimpleMediaImage loadingMode={loadingMode}
                             storageKey={attachment}
                             className="attachment-image"
-                            alt="Attachment"
+                            alt=""
                             sx={{
                               width: '100%',
                               height: '100%',
                               objectFit: 'cover',
-                              transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              transition: 'transform 0.2s ease',
                             }}
                           />
                           <Box
@@ -727,7 +734,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                               justifyContent: 'center',
                               opacity: 0,
                               transition: 'opacity 0.3s ease',
-                              backdropFilter: 'blur(2px)',
+                              // backdropFilter removed for performance
                             }}
                           >
                             <ZoomInIcon sx={{ 
@@ -748,7 +755,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                               py: 0.25,
                               fontSize: '0.7rem',
                               fontWeight: 600,
-                              backdropFilter: 'blur(6px)',
+                              // backdropFilter removed for performance
                               border: '1px solid rgba(255,255,255,0.15)',
                             }}
                           >
@@ -778,16 +785,16 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                           overflow: 'hidden',
                           gridColumn: 'span 2',
                           cursor: 'pointer',
-                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                           boxShadow: '0 6px 24px rgba(0,0,0,0.1)',
                           border: '1px solid rgba(255,255,255,0.08)',
                           '&:hover': {
-                            transform: 'scale(1.02)',
+                            transform: 'scale(1.01)',
                             boxShadow: '0 12px 32px rgba(0,0,0,0.15)',
                             border: '1px solid rgba(0, 207, 255, 0.3)',
                             zIndex: 2,
                             '& .zoom-overlay': { opacity: 1 },
-                            '& .attachment-image': { transform: 'scale(1.05)' }
+                            '& .attachment-image': { transform: 'scale(1.03)' }
                           }
                         }}
                         onClick={() => handleImageClick(message.attachments[0], 0)}
@@ -795,12 +802,12 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                         <SimpleMediaImage loadingMode={loadingMode}
                           storageKey={message.attachments[0]}
                           className="attachment-image"
-                          alt="Attachment"
+                          alt=""
                           sx={{
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover',
-                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            transition: 'transform 0.2s ease',
                           }}
                         />
                         <Box
@@ -814,7 +821,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             justifyContent: 'center',
                             opacity: 0,
                             transition: 'opacity 0.3s ease',
-                            backdropFilter: 'blur(2px)',
+                            // backdropFilter removed for performance
                           }}
                         >
                           <ZoomInIcon sx={{ 
@@ -835,7 +842,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             py: 0.5,
                             fontSize: '0.75rem',
                             fontWeight: 600,
-                            backdropFilter: 'blur(6px)',
+                            // backdropFilter removed for performance
                             border: '1px solid rgba(255,255,255,0.15)',
                           }}
                         >
@@ -854,16 +861,16 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                               overflow: 'hidden',
                               flex: 1,
                               cursor: 'pointer',
-                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                               boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
                               border: '1px solid rgba(255,255,255,0.08)',
                               '&:hover': {
-                                transform: 'scale(1.05)',
+                                transform: 'scale(1.03)',
                                 boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
                                 border: '1px solid rgba(0, 207, 255, 0.3)',
                                 zIndex: 2,
                                 '& .zoom-overlay': { opacity: 1 },
-                                '& .attachment-image': { transform: 'scale(1.08)' }
+                                '& .attachment-image': { transform: 'scale(1.03)' }
                               }
                             }}
                             onClick={() => handleImageClick(attachment, index + 1)}
@@ -871,12 +878,12 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                             <SimpleMediaImage loadingMode={loadingMode}
                               storageKey={attachment}
                               className="attachment-image"
-                              alt="Attachment"
+                              alt=""
                               sx={{
                                 width: '100%',
                                 height: '100%',
                                 objectFit: 'cover',
-                                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                transition: 'transform 0.2s ease',
                               }}
                             />
                             <Box
@@ -890,7 +897,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                                 justifyContent: 'center',
                                 opacity: 0,
                                 transition: 'opacity 0.3s ease',
-                                backdropFilter: 'blur(2px)',
+                                // backdropFilter removed for performance
                               }}
                             >
                               {/* Show "+N more" overlay on the last visible image */}
@@ -939,7 +946,7 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                                 py: 0.25,
                                 fontSize: '0.7rem',
                                 fontWeight: 600,
-                                backdropFilter: 'blur(6px)',
+                                // backdropFilter removed for performance
                                 border: '1px solid rgba(255,255,255,0.15)',
                               }}
                             >
@@ -999,12 +1006,19 @@ export const ChatMessageItem = React.memo<ChatMessageItemProps>((props) => {
                 }}
               />
             )}
+            
+            {/* Placeholder для сообщений без текста */}
+            {!message.content && hasAttachments && (
+              <Box sx={{ minHeight: '20px' }} />
+            )}
+            
+            {/* Message metadata - время и статус прочтения */}
             <Box sx={{ 
               display: 'flex',
               alignItems: 'center',
               gap: 0.5,
               position: 'absolute',
-              top: 0,
+              bottom: message.content ? '7px' : '22px',
               right: 0,
               padding: '0 8px',
             }}>

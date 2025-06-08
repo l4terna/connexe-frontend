@@ -6,18 +6,6 @@ import { LoadingMode } from '../hooks/useMessagePagination';
 
 interface ChatHeaderProps {
   activeChannel: Channel | null;
-  searchMode: boolean;
-  setSearchMode: (mode: boolean) => void;
-  searchQuery: string;
-  searchInputRef: React.RefObject<HTMLInputElement | null>;
-  searchResultsRef: React.RefObject<HTMLDivElement | null>;
-  showSearchResults: boolean;
-  setShowSearchResults: (show: boolean) => void;
-  searchResults: Message[] | undefined;
-  isSearching: boolean;
-  debouncedSearchQuery: string;
-  handleSearchInputChange: (value: string) => void;
-  clearSearch: () => void;
   onSearchResultClick: (message: Message) => void;
   // Loading states
   isLoadingMessages?: boolean;
@@ -35,18 +23,6 @@ interface ChatHeaderProps {
  */
 const ChatHeader: React.FC<ChatHeaderProps> = ({
   activeChannel,
-  searchMode,
-  setSearchMode,
-  searchQuery,
-  searchInputRef,
-  searchResultsRef,
-  showSearchResults,
-  setShowSearchResults,
-  searchResults,
-  isSearching,
-  debouncedSearchQuery,
-  handleSearchInputChange,
-  clearSearch,
   onSearchResultClick,
   isLoadingMessages = false,
   isLoadingAround = false,
@@ -57,21 +33,6 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     (paginationState?.loadingMode === 'pagination' && 
      (paginationState.beforeId !== null || paginationState.afterId !== null)) ||
     (paginationState?.loadingMode === 'around' && paginationState.isJumpingToMessage);
-
-  // Determine loading message
-  const getLoadingMessage = () => {
-    if (isLoadingAround || (paginationState?.loadingMode === 'around' && paginationState.isJumpingToMessage)) {
-      return 'Переход к сообщению...';
-    }
-    if (paginationState?.loadingMode === 'pagination') {
-      if (paginationState.beforeId) return 'Загрузка предыдущих сообщений...';
-      if (paginationState.afterId) return 'Загрузка следующих сообщений...';
-    }
-    if (isLoadingMessages) {
-      return 'Загрузка сообщений...';
-    }
-    return 'Загрузка...';
-  };
 
   return (
     <Box sx={{ 
@@ -88,18 +49,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       </Typography>
       
       <SearchBar
-        searchMode={searchMode}
-        setSearchMode={setSearchMode}
-        searchQuery={searchQuery}
-        searchInputRef={searchInputRef}
-        searchResultsRef={searchResultsRef}
-        showSearchResults={showSearchResults}
-        setShowSearchResults={setShowSearchResults}
-        searchResults={searchResults}
-        isSearching={isSearching}
-        debouncedSearchQuery={debouncedSearchQuery}
-        handleSearchInputChange={handleSearchInputChange}
-        clearSearch={clearSearch}
+        activeChannelId={activeChannel?.id || null}
         onSearchResultClick={onSearchResultClick}
       />
 

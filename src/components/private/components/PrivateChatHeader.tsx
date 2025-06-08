@@ -1,6 +1,5 @@
 import React from 'react';
-import { Box, Typography, IconButton, CircularProgress } from '@mui/material';
-import { Search as SearchIcon, Close as CloseIcon } from '@mui/icons-material';
+import { Box, Typography, CircularProgress } from '@mui/material';
 import UserAvatar from '../../UserAvatar';
 import SearchBar from '../../hub/chat/components/SearchBar';
 import { Channel, Message } from '../../../api/channels';
@@ -28,6 +27,9 @@ interface PrivateChatHeaderProps {
   handleSearchInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   clearSearch: () => void;
   onSearchResultClick: (message: Message) => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
   isLoadingMessages: boolean;
   isLoadingAround: boolean;
   paginationState: {
@@ -54,6 +56,9 @@ const PrivateChatHeader: React.FC<PrivateChatHeaderProps> = ({
   handleSearchInputChange,
   clearSearch,
   onSearchResultClick,
+  onLoadMore,
+  hasMore,
+  isLoadingMore,
   isLoadingMessages,
   isLoadingAround,
   paginationState
@@ -87,6 +92,7 @@ const PrivateChatHeader: React.FC<PrivateChatHeaderProps> = ({
         borderBottom: '1px solid rgba(255,255,255,0.1)',
         position: 'relative',
         minHeight: '64px',
+        zIndex: 1,
       }}
     >
       {/* Left side - User info */}
@@ -167,55 +173,31 @@ const PrivateChatHeader: React.FC<PrivateChatHeaderProps> = ({
       </Box>
 
       {/* Right side - Search */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        {!searchMode ? (
-          <IconButton
-            onClick={() => setSearchMode(true)}
-            sx={{
-              color: 'rgba(255,255,255,0.7)',
-              '&:hover': {
-                color: 'white',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-              },
-            }}
-          >
-            <SearchIcon />
-          </IconButton>
-        ) : (
-          <Box sx={{ position: 'relative', minWidth: 300 }}>
-            <SearchBar
-              searchQuery={searchQuery}
-              searchInputRef={searchInputRef}
-              searchResultsRef={searchResultsRef}
-              showSearchResults={showSearchResults}
-              setShowSearchResults={setShowSearchResults}
-              searchResults={searchResults}
-              isSearching={isSearching}
-              debouncedSearchQuery={debouncedSearchQuery}
-              handleSearchInputChange={(value: string) => handleSearchInputChange({ target: { value } } as React.ChangeEvent<HTMLInputElement>)}
-              onSearchResultClick={onSearchResultClick}
-              placeholder="Search in conversation..."
-            />
-            <IconButton
-              onClick={clearSearch}
-              sx={{
-                position: 'absolute',
-                right: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'rgba(255,255,255,0.7)',
-                '&:hover': {
-                  color: 'white',
-                  backgroundColor: 'rgba(255,255,255,0.1)',
-                },
-                zIndex: 10,
-              }}
-              size="small"
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          </Box>
-        )}
+      <Box sx={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: 1,
+        position: 'relative',
+        zIndex: 10000
+      }}>
+        <SearchBar
+          searchMode={searchMode}
+          setSearchMode={setSearchMode}
+          searchQuery={searchQuery}
+          searchInputRef={searchInputRef}
+          searchResultsRef={searchResultsRef}
+          showSearchResults={showSearchResults}
+          setShowSearchResults={setShowSearchResults}
+          searchResults={searchResults}
+          isSearching={isSearching}
+          debouncedSearchQuery={debouncedSearchQuery}
+          handleSearchInputChange={(value: string) => handleSearchInputChange({ target: { value } } as React.ChangeEvent<HTMLInputElement>)}
+          clearSearch={clearSearch}
+          onSearchResultClick={onSearchResultClick}
+          onLoadMore={onLoadMore}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+        />
       </Box>
     </Box>
   );

@@ -243,8 +243,14 @@
     );
 
     const shouldShowEmptyState = React.useMemo(() => 
-      emptyMessages && !isLoadingMore && !!activeChannel,
-      [emptyMessages, isLoadingMore, activeChannel]
+      emptyMessages && 
+      !isLoadingMore && 
+      !isLoadingAround &&
+      paginationState.loadingMode !== 'initial' &&
+      paginationState.loadingMode !== 'around' &&
+      !paginationState.isJumpingToMessage &&
+      !!activeChannel,
+      [emptyMessages, isLoadingMore, isLoadingAround, paginationState.loadingMode, paginationState.isJumpingToMessage, activeChannel]
     );
 
     // Memoize combined messages for performance
@@ -585,7 +591,9 @@
         className="messages-container"
         sx={{ 
           flex: 1, 
-          p: 3, 
+          px: 3,
+          pt: 3,
+          pb: 1,
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
@@ -900,7 +908,7 @@
             })()}
 
             {/* Bottom pagination trigger */}
-            <div ref={bottomTriggerRef} style={{ height: '1px', margin: '20px 0' }} />
+            <div ref={bottomTriggerRef} style={{ height: '1px', margin: '2px 0' }} />
 
             {/* For properly tracking the end of messages for scrolling */}
             <div ref={messagesEndRef} />

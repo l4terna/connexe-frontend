@@ -386,8 +386,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     paginationActions.setBeforeId(null);
     paginationActions.setAfterId(null);
     setEditingMessageId(null);
-    setCurrentDateLabel(null);
     setShowDateLabel(false);
+    setCurrentDateLabel(null);
     setShowScrollButton(false);
     setIsScrolledToBottom(true);
     setLoadingWithTimeout(false);

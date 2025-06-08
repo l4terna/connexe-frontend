@@ -20,32 +20,35 @@ interface ImagePreviewModalProps {
 
 const StyledDialog = styled(Dialog)({
   '& .MuiBackdrop-root': {
-    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     backdropFilter: 'blur(8px)',
   },
   '& .MuiDialog-paper': {
-    backgroundColor: 'transparent',
-    boxShadow: 'none',
-    maxWidth: 'none',
-    maxHeight: 'none',
-    margin: 0,
+    backgroundColor: 'rgba(30, 30, 47, 0.95)',
+    backdropFilter: 'blur(10px)',
+    borderRadius: '16px',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    maxWidth: '70vw',
+    maxHeight: '70vh',
+    margin: 'auto',
     overflow: 'hidden',
   },
 });
 
 const ImageContainer = styled('div')({
   position: 'relative',
-  width: '100vw',
-  height: '100vh',
+  width: '100%',
+  height: '100%',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   userSelect: 'none',
+  padding: '20px',
 });
 
 const StyledImage = styled('img')({
-  maxWidth: 'calc(100vw - 120px)',
-  maxHeight: 'calc(100vh - 120px)',
+  width: '100%',
+  height: 'calc(70vh - 120px)',
   objectFit: 'contain',
   borderRadius: '12px',
   filter: 'drop-shadow(0 8px 32px rgba(0,0,0,0.8))',
@@ -170,7 +173,6 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
     <StyledDialog
       open={open}
       onClose={onClose}
-      fullScreen
       onKeyDown={handleKeyDown}
     >
       <ImageContainer onClick={onClose}>

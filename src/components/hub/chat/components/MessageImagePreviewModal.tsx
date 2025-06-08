@@ -14,27 +14,30 @@ interface MessageImagePreviewModalProps {
 
 const StyledDialog = styled(Dialog)({
   '& .MuiBackdrop-root': {
-    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     backdropFilter: 'blur(8px)',
   },
   '& .MuiDialog-paper': {
-    backgroundColor: 'transparent',
-    boxShadow: 'none',
-    maxWidth: 'none',
-    maxHeight: 'none',
-    margin: 0,
+    backgroundColor: 'rgba(30, 30, 47, 0.95)',
+    backdropFilter: 'blur(10px)',
+    borderRadius: '16px',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    maxWidth: '70vw',
+    maxHeight: '90vh',
+    margin: 'auto',
     overflow: 'hidden',
   },
 });
 
 const ImageContainer = styled('div')({
   position: 'relative',
-  width: '100vw',
-  height: '100vh',
+  width: '100%',
+  height: '100%',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   userSelect: 'none',
+  padding: '20px',
 });
 
 const NavButton = styled(IconButton)({
@@ -116,8 +119,8 @@ const Dot = styled('button')<{ active?: boolean }>(({ active }) => ({
 }));
 
 const StyledImageContainer = styled(Box)({
-  maxWidth: 'calc(100vw - 120px)',
-  maxHeight: 'calc(100vh - 120px)',
+  width: '100%',
+  height: 'calc(90vh - 120px)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -160,7 +163,6 @@ const MessageImagePreviewModal: React.FC<MessageImagePreviewModalProps> = ({
     <StyledDialog
       open={open}
       onClose={onClose}
-      fullScreen
       onKeyDown={handleKeyDown}
     >
       <ImageContainer onClick={onClose}>
@@ -169,8 +171,8 @@ const MessageImagePreviewModal: React.FC<MessageImagePreviewModalProps> = ({
             storageKey={currentStorageKey}
             alt="Preview"
             sx={{
-              maxWidth: '100%',
-              maxHeight: '100%',
+              width: '100%',
+              height: '100%',
               objectFit: 'contain',
               borderRadius: '12px',
               filter: 'drop-shadow(0 8px 32px rgba(0,0,0,0.8))',

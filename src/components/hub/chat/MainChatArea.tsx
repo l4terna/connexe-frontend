@@ -46,6 +46,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ExtendedMessage | null>(null);
   const replyingToMessageRef = useRef<ExtendedMessage | null>(null);
+  const [isUpdatingFromRequest, setIsUpdatingFromRequest] = useState(false);
   
   // Использование хука для управления состоянием сообщений
   const {
@@ -224,7 +225,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
     onMarkAllAsRead: markAllMessagesAsRead,
     bulkReadAllRef,
     paginationActions,
-    messagesPerPage: 50
+    messagesPerPage: 50,
+    isUpdatingFromRequest
   });
   
   // Assign scroll correction functions to ref for pagination use
@@ -587,7 +589,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       const newExtendedMessages = aroundMessagesData.map(convertToExtendedMessage);
       
       // Устанавливаем новые сообщения (старые уже очищены при клике на результат поиска)
+      setIsUpdatingFromRequest(true);
       setMessages(newExtendedMessages);
+      // Сбрасываем флаг после небольшой задержки
+      setTimeout(() => setIsUpdatingFromRequest(false), 100);
       messagesLengthRef.current = newExtendedMessages.length;
       
       // Запоминаем ID around запроса
@@ -677,7 +682,10 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       const newExtendedMessages = messagesData.map(convertToExtendedMessage);
             
       // Просто устанавливаем новые сообщения
+      setIsUpdatingFromRequest(true);
       setMessages(newExtendedMessages);
+      // Сбрасываем флаг после небольшой задержки
+      setTimeout(() => setIsUpdatingFromRequest(false), 100);
       messagesLengthRef.current = newExtendedMessages.length;
       
       // Track message count from initial request
@@ -775,6 +783,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       }
       
       // Add new messages to the beginning
+      setIsUpdatingFromRequest(true);
       setMessages(prev => {
         const combined = [...newExtendedMessages, ...prev];
         // Remove duplicates
@@ -783,6 +792,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         );
         return uniqueMessages;
       });
+      // Сбрасываем флаг после небольшой задержки
+      setTimeout(() => setIsUpdatingFromRequest(false), 100);
       
       // Check if we got fewer messages than requested (no more messages)
       if (newExtendedMessages.length < MESSAGES_PER_PAGE) {
@@ -805,6 +816,7 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
       paginationActions.updateLastRequestMessageCount(messagesData.length, 'after');
       
       // Add new messages to the end
+      setIsUpdatingFromRequest(true);
       setMessages(prev => {
         const combined = [...prev, ...newExtendedMessages];
         // Remove duplicates
@@ -813,6 +825,8 @@ const MainChatArea: React.FC<MainChatAreaProps> = ({ activeChannel, user, hubId,
         );
         return uniqueMessages;
       });
+      // Сбрасываем флаг после небольшой задержки
+      setTimeout(() => setIsUpdatingFromRequest(false), 100);
       
       // Check if we got fewer messages than requested (no more messages)
       if (newExtendedMessages.length < MESSAGES_PER_PAGE) {

@@ -15,6 +15,7 @@ interface UseMessageScrollProps {
     ) => void;
   };
   messagesPerPage?: number;
+  isUpdatingFromRequest?: boolean;
 }
 
 interface UseMessageScrollReturn {
@@ -41,7 +42,8 @@ export const useMessageScroll = ({
   onMarkAllAsRead,
   bulkReadAllRef,
   paginationActions,
-  messagesPerPage = 20
+  messagesPerPage = 20,
+  isUpdatingFromRequest = false
 }: UseMessageScrollProps): UseMessageScrollReturn => {
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -311,8 +313,12 @@ export const useMessageScroll = ({
     const currentMessageCount = messages.length;
     const previousMessageCount = messagesCountRef.current;
 
-    // Check if messages were added at the beginning (pagination up)
-    if (currentMessageCount > previousMessageCount && previousMessageCount > 0) {
+    // Only apply scroll correction if messages were updated from a request (pagination)
+    // and not from WebSocket updates
+    if (currentMessageCount > previousMessageCount && 
+        previousMessageCount > 0 && 
+        isUpdatingFromRequest) {
+      
       const heightDifference = container.scrollHeight - previousScrollHeightRef.current;
       
       if (heightDifference > 0) {
@@ -326,7 +332,7 @@ export const useMessageScroll = ({
     messagesCountRef.current = currentMessageCount;
     previousScrollHeightRef.current = container.scrollHeight;
     previousScrollTopRef.current = container.scrollTop;
-  }, [messages.length, messagesContainerRef]);
+  }, [messages.length, messagesContainerRef, isUpdatingFromRequest]);
 
   // Cleanup on unmount
   useEffect(() => {

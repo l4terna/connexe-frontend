@@ -44,6 +44,7 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ExtendedMessage | null>(null);
   const replyingToMessageRef = useRef<ExtendedMessage | null>(null);
+  const [isUpdatingFromRequest, setIsUpdatingFromRequest] = useState(false);
   
   // Использование хука для управления состоянием сообщений
   const {
@@ -104,7 +105,8 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
     messages,
     activeChannel,
     user,
-    onMarkAllAsRead: markAllMessagesAsRead
+    onMarkAllAsRead: markAllMessagesAsRead,
+    isUpdatingFromRequest
   });
   
   const messagesEndRef = useRef<HTMLDivElement>(null!);
@@ -382,7 +384,9 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
       
       const newExtendedMessages = aroundMessagesData.map(convertToExtendedMessage);
       
+      setIsUpdatingFromRequest(true);
       setMessages(newExtendedMessages);
+      setTimeout(() => setIsUpdatingFromRequest(false), 100);
       messagesLengthRef.current = newExtendedMessages.length;
       
       setLastAroundId(paginationState.aroundMessageId);
@@ -432,7 +436,9 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
     if (paginationState.loadingMode === 'initial') {
       const newExtendedMessages = messagesData.map(convertToExtendedMessage);
             
+      setIsUpdatingFromRequest(true);
       setMessages(newExtendedMessages);
+      setTimeout(() => setIsUpdatingFromRequest(false), 100);
       messagesLengthRef.current = newExtendedMessages.length;
       
       if (messagesData.length < MESSAGES_PER_PAGE) {
@@ -858,6 +864,7 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
         
         const newExtendedMessages = messagesData.map(convertToExtendedMessage);
         
+        setIsUpdatingFromRequest(true);
         setMessages((prev: ExtendedMessage[]) => {
           const messagesMap = new Map<number, ExtendedMessage>();
           
@@ -878,6 +885,7 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
 
           return mergedMessages;
         });
+        setTimeout(() => setIsUpdatingFromRequest(false), 100);
 
         setTimeout(() => {
           if (scrollCorrectionRef.current) {
@@ -931,6 +939,7 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
         
         const newExtendedMessages = dataToProcess.map(convertToExtendedMessage);
         
+        setIsUpdatingFromRequest(true);
         setMessages((prev: ExtendedMessage[]) => {
           const messagesMap = new Map<number, ExtendedMessage>();
           
@@ -951,6 +960,7 @@ const PrivateChatArea: React.FC<PrivateChatAreaProps> = ({ activeChannel, user, 
             
           return mergedMessages;
         });
+        setTimeout(() => setIsUpdatingFromRequest(false), 100);
 
         requestAnimationFrame(() => {
           setLoadingWithTimeout(false);
